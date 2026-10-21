@@ -12,6 +12,7 @@ import tempfile
 import tarfile
 import zipfile
 from pathlib import Path
+from urllib.parse import quote
 
 from playwright.sync_api import sync_playwright
 
@@ -41,19 +42,31 @@ def main() -> None:
     if sys.platform == "darwin":
         # Preserve Chromium's signed app bundle and framework symlinks without PyInstaller rewriting its binaries.
         shutil.copytree(browser, package / "_internal" / "browsers" / browser.name, symlinks=True)
-    for document in ("README.md", "README.en.md", "THIRD_PARTY_NOTICES.md", "AGENTS.md", "GLOSSARY.md"):
-        shutil.copy2(ROOT / document, package / document)
-    shutil.copytree(ROOT / "licenses", package / "licenses", dirs_exist_ok=True)
-    shutil.copytree(ROOT / "docs", package / "docs", dirs_exist_ok=True)
+    for document in ("README.md", "README.en.md"):
+        def package_link(match: re.Match[str]) -> str:
+            target = match[1]
+            if re.match(r"[a-zA-Z][a-zA-Z0-9+.-]*:|#", target) or target in ("README.md", "README.en.md"):
+                return match[0]
+            if target == "THIRD_PARTY_NOTICES.md":
+                return "](_internal/THIRD_PARTY_NOTICES.md)"
+            source = ROOT / target.split("#", 1)[0]
+            assert source.exists(), "README link points to a missing source document"
+            kind = "tree" if source.is_dir() else "blob"
+            return f"](https://github.com/MuZiJin701/{NAME}/{kind}/main/{quote(target, safe='/#')})"
+
+        readme = re.sub(r"\]\(([^)]+)\)", package_link, (ROOT / document).read_text(encoding="utf-8"))
+        (package / document).write_text(readme, encoding="utf-8")
+    shutil.copy2(ROOT / "THIRD_PARTY_NOTICES.md", package / "_internal" / "THIRD_PARTY_NOTICES.md")
+    shutil.copytree(ROOT / "licenses", package / "_internal" / "licenses", dirs_exist_ok=True)
     system = platform.system().lower()
     if system == "darwin":
-        launcher = package / "微信视频号下载.command"
+        launcher = package / f"{NAME}.command"
         launcher.write_text('#!/bin/sh\ncd -- "$(dirname -- "$0")"\nexec ./wechat-channels-downloader\n', encoding="utf-8")
         launcher.chmod(0o755)
     elif system == "linux":
         shell = 'exec "$(dirname "$1")/wechat-channels-downloader"'
         argument = '"' + re.sub(r'(["`$\\])', r'\\\1', shell).replace("\\", "\\\\") + '"'
-        launcher = package / "微信视频号下载.desktop"
+        launcher = package / f"{NAME}.desktop"
         launcher.write_text(
             "[Desktop Entry]\nType=Application\nName=微信视频号下载\nTerminal=true\n"
             + f"Exec=sh -c {argument} sh %k\n", encoding="utf-8")
@@ -66,6 +79,9 @@ def main() -> None:
                            cwd=working_directory, check=True, timeout=90)
     assert not (package / "data").exists(), "Smoke check must not ship login state"
     assert not (package / "downloads").exists(), "Smoke check must not ship downloaded content"
+    assert {path.name for path in package.glob("*.md")} == {"README.md", "README.en.md"}, "Unexpected package documents"
+    assert not (package / "docs").exists(), "Development documents must not be distributed"
+    assert (package / "_internal" / "licenses").is_dir(), "Third-party licenses are missing"
     machine = platform.machine().lower()
     architecture = "x64" if machine in ("amd64", "x86_64") else "arm64" if machine in ("aarch64", "arm64") else machine
     archive = shutil.make_archive(str(ROOT / "dist" / f"{NAME}-{system}-{architecture}"),

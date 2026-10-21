@@ -1,5 +1,6 @@
 import json
 import io
+import asyncio
 import tempfile
 import unittest
 from contextlib import asynccontextmanager
@@ -9,6 +10,7 @@ from unittest.mock import patch
 import httpx
 from PIL import Image, ImageDraw
 from textual.widgets import Input, Static
+from textual.color import Color
 
 from downloader.app import DownloaderApp
 
@@ -26,6 +28,11 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             "origins": [],
         }), encoding="utf-8")
         self.feed = {"desc": "测试视频", "h264VideoInfo": {"videoUrl": "https://media.weixin.qq.com/video.mp4"}}
+        self.parse_data = {"playable_url": "https://channels.weixin.qq.com/finder-preview/pages/feed?token=fixture&eid=fixture"}
+        self.author_info = {}
+        self.media_requests = []
+        self.media_status = {}
+        self.feed_status = 200
         self.media = {"/video.mp4": (b"complete-video", "video/mp4")}
         self.info_status = 200
         self.info_html = False
@@ -45,6 +52,9 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
 
     async def browser_setup(self, context):
         async def route(request):
+            if request.request.url.startswith(self.root.as_uri() + "/"):
+                await request.continue_()
+                return
             if request.request.url.endswith("/fixture/scanned"):
                 headers = ({"set-cookie": "session=scan-secret; Path=/; Secure; HttpOnly; SameSite=Lax"}
                            if self.scanned and not self.additional_verification else {})
@@ -117,20 +127,26 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, content=data.getvalue(), headers={"content-type": "image/png"})
         if request.url.path == "/api/weixin/get_parse_result":
             self.assertEqual(request.headers.get("cookie"), "session=scan-secret" if self.login_mode else "session=test-secret")
-            return httpx.Response(200, json={"code": 0, "data": {
-                "playable_url": "https://channels.weixin.qq.com/finder-preview/pages/feed?token=fixture&eid=fixture"
-            }})
+            return httpx.Response(200, json={"code": 0, "data": self.parse_data})
         if request.url.path == "/finder-preview/api/feed/get_feed_info":
             self.assertNotIn("cookie", request.headers)
-            return httpx.Response(200, json={"errCode": 0, "data": {"feedInfo": self.feed, "errMsg": self.feed_error}})
-        if request.url.host == "media.weixin.qq.com":
+            if self.feed_status != 200:
+                return httpx.Response(self.feed_status)
+            return httpx.Response(200, json={"errCode": 0, "data": {
+                "feedInfo": self.feed, "authorInfo": self.author_info, "errMsg": self.feed_error}})
+        if request.url.host in ("media.weixin.qq.com", "wx.music.tc.qq.com"):
             self.assertNotIn("cookie", request.headers)
+            self.media_requests.append(str(request.url))
+            if request.url.path in self.media_status:
+                return httpx.Response(self.media_status[request.url.path])
             if self.redirect:
                 return httpx.Response(302, headers={"location": self.redirect})
             body, mime = self.media[request.url.path]
             headers = {"content-type": mime}
             if self.media_length:
                 headers["content-length"] = str(self.media_length)
+            if isinstance(body, httpx.AsyncByteStream):
+                return httpx.Response(200, stream=body, headers=headers)
             return httpx.Response(200, content=body, headers=headers)
         raise AssertionError("Unexpected external request")
 
@@ -158,12 +174,31 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         await self.wait_for(pilot, lambda: "完成" in self.status(app) or "失败" in self.status(app) or "请输入" in self.status(app))
 
     async def test_valid_session_downloads_a_complete_video_through_tui(self):
+        self.parse_data.update({"author": "发布者", "yuanbao_only": "第一步独有信息"})
         async with self.running() as (app, pilot):
             await self.submit(app, pilot)
-            files = list((self.root / "downloads").glob("*/video.mp4"))
-            self.assertEqual(len(files), 1, self.status(app))
-            self.assertEqual(files[0].read_bytes(), b"complete-video")
+            archive = self.root / "downloads" / "发布者_测试视频"
+            self.assertTrue(archive.is_dir(), self.status(app))
+            self.assertEqual(next(archive.glob("发布者_测试视频*.mp4")).read_bytes(), b"complete-video")
+            self.assertEqual(json.loads((archive / "yuanbao.json").read_text(encoding="utf-8"))["data"], self.parse_data)
+            self.assertEqual(json.loads((archive / "feed.json").read_text(encoding="utf-8"))["data"]["feedInfo"], self.feed)
+            self.assertFalse(list(archive.glob("*.txt")))
+            page = await app.session.context.new_page()
+            page.set_default_timeout(3000)
+            await page.goto((archive / "index.html").as_uri())
+            self.assertEqual(await page.locator("#description").inner_text(), "测试视频")
+            self.assertEqual(await page.locator("video").count(), 1)
+            self.assertEqual(await page.locator("#result").inner_text(), "完成")
+            self.assertFalse((await page.locator("video").get_attribute("src")).startswith("https:"))
             self.assertIn("完成", self.status(app))
+
+    async def test_tui_uses_terminal_foreground_and_background_with_black_white_qr(self):
+        async with self.running() as (app, pilot):
+            await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
+            self.assertEqual(app.screen.styles.background, Color.parse("ansi_default"))
+            self.assertEqual(app.screen.styles.color, Color.parse("ansi_default"))
+            self.assertEqual(app.query_one("#qr").styles.background, Color.parse("white"))
+            self.assertEqual(app.query_one("#qr").styles.color, Color.parse("black"))
 
     async def test_image_post_saves_all_images_in_order_and_text(self):
         self.feed = {"description": "图文正文", "picInfo": [
@@ -173,9 +208,111 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             await self.submit(app, pilot)
             posts = list((self.root / "downloads").iterdir())
             self.assertEqual(len(posts), 1, self.status(app))
-            self.assertEqual((posts[0] / "001.jpg").read_bytes(), b"first-image")
-            self.assertEqual((posts[0] / "002.png").read_bytes(), b"second-image")
-            self.assertEqual((posts[0] / "正文.txt").read_text(encoding="utf-8"), "图文正文")
+            self.assertEqual(next(posts[0].glob("*_图片_001.jpg")).read_bytes(), b"first-image")
+            self.assertEqual(next(posts[0].glob("*_图片_002.png")).read_bytes(), b"second-image")
+            self.assertIn("图文正文", (posts[0] / "index.html").read_text(encoding="utf-8"))
+            self.assertFalse(list(posts[0].glob("*.txt")))
+
+    async def test_archive_keeps_all_media_versions_attachments_and_local_information(self):
+        image = io.BytesIO()
+        Image.new("RGB", (4, 3), "red").save(image, format="PNG")
+        png = image.getvalue()
+        avatar = "https://media.weixin.qq.com/avatar.png?urlToken=fixture-private"
+        self.parse_data.update({"author": "发布者", "author_icon": avatar,
+                                "author_certification_icon": "https://media.weixin.qq.com/icon.png",
+                                "cover_url": "https://media.weixin.qq.com/parse-cover.png"})
+        self.author_info = {"nickname": "发布者", "headImgUrl": avatar}
+        self.feed = {"description": "全部资源", "h264VideoInfo": {"videoUrl": "https://media.weixin.qq.com/video.mp4"},
+                     "h265VideoInfo": {"videoUrl": "https://media.weixin.qq.com/hevc.mp4"},
+                     "videoUrl": "https://media.weixin.qq.com/video.mp4",
+                     "picInfo": [{"url": "https://media.weixin.qq.com/first.png"},
+                                 {"url": "https://media.weixin.qq.com/cover.png"}],
+                     "coverUrl": "https://media.weixin.qq.com/cover.png", "createtime": 1704067200,
+                     "favCountFmt": "1万", "jumpInfo": {"wording": "杭州"},
+                     "bgmInfo": {"bgmUrl": "http://wx.music.tc.qq.com/background.m4a"},
+                     "future_field": {"unchanged": True}}
+        self.media.update({"/hevc.mp4": (b"hevc-video", "video/mp4"),
+                           "/background.m4a": (b"original-audio", "audio/mp4"),
+                           **{f"/{name}.png": (png, "image/png")
+                              for name in ("first", "cover", "parse-cover", "avatar", "icon")}})
+        async with self.running() as (app, pilot):
+            await self.submit(app, pilot)
+            archive = self.root / "downloads" / "发布者_全部资源"
+            self.assertEqual(len(list(archive.glob("*.mp4"))), 2)
+            self.assertEqual(next(archive.glob("*.m4a")).read_bytes(), b"original-audio")
+            self.assertEqual(len(list(archive.glob("*.png"))), 5)
+            self.assertEqual(len(self.media_requests), 8)
+            self.assertIn("https://wx.music.tc.qq.com/background.m4a", self.media_requests)
+            self.assertEqual(json.loads((archive / "feed.json").read_text(encoding="utf-8"))["data"]["feedInfo"], self.feed)
+            page = await app.session.context.new_page()
+            page.set_default_timeout(3000)
+            await page.goto((archive / "index.html").as_uri())
+            self.assertEqual(await page.locator("video").count(), 3)
+            self.assertEqual(await page.locator("audio").count(), 1)
+            self.assertIn("1万", await page.locator("body").inner_text())
+            self.assertIn("杭州", await page.locator("body").inner_text())
+            self.assertIn("2024-01-01", await page.locator("body").inner_text())
+            self.assertIn("UTC", await page.locator("body").inner_text())
+            self.assertNotIn("fixture-private", await page.content())
+            self.assertTrue(await page.locator("img").evaluate_all("items => items.every(i => i.complete && i.naturalWidth === 4)"))
+
+    async def test_failed_attachment_keeps_other_resources_and_reports_partial_archive(self):
+        self.feed.update({"coverUrl": "https://media.weixin.qq.com/broken.jpg",
+                          "bgmInfo": {"bgmUrl": "https://media.weixin.qq.com/music.m4a"}})
+        self.media_status["/broken.jpg"] = 503
+        self.media["/music.m4a"] = (b"music-after-failure", "audio/mp4")
+        async with self.running() as (app, pilot):
+            await self.submit(app, pilot)
+            self.assertIn("部分完成", self.status(app))
+            archive = self.root / "downloads" / "测试视频"
+            self.assertEqual(next(archive.glob("*.mp4")).read_bytes(), b"complete-video")
+            self.assertEqual(next(archive.glob("*.m4a")).read_bytes(), b"music-after-failure")
+            self.assertFalse(list(archive.glob("*.part")))
+            self.assertEqual(len(list(archive.glob("*.json"))), 2)
+            page = await app.session.context.new_page()
+            page.set_default_timeout(3000)
+            await page.goto((archive / "index.html").as_uri())
+            self.assertEqual(await page.locator("#result").inner_text(), "部分完成")
+            self.assertIn("封面", await page.locator("body").inner_text())
+            self.assertIn("失败", await page.locator("body").inner_text())
+            self.assertNotIn("https://media", await page.content())
+
+    async def test_second_parse_failure_preserves_the_first_response_and_explanation(self):
+        self.parse_data.update({"author": "发布者", "desc": "仅元宝说明", "extra": {"keep": True}})
+        self.feed_status = 503
+        async with self.running() as (app, pilot):
+            await self.submit(app, pilot)
+            self.assertIn("失败", self.status(app))
+            archive = self.root / "downloads" / "发布者_仅元宝说明"
+            self.assertTrue((archive / "index.html").exists())
+            self.assertEqual(json.loads((archive / "yuanbao.json").read_text(encoding="utf-8"))["data"], self.parse_data)
+            self.assertFalse((archive / "feed.json").exists())
+            self.assertNotIn("test-secret", (archive / "index.html").read_text(encoding="utf-8"))
+
+    async def test_quitting_during_transfer_keeps_completed_files_and_marks_interrupted(self):
+        started = asyncio.Event()
+
+        class SlowMedia(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b"incomplete-image"
+                started.set()
+                await asyncio.Event().wait()
+
+        self.feed = {"description": "中断测试", "picInfo": [{"url": "https://media.weixin.qq.com/first.jpg"},
+                                                          {"url": "https://media.weixin.qq.com/slow.jpg"}]}
+        self.media = {"/first.jpg": (b"complete-first", "image/jpeg"), "/slow.jpg": (SlowMedia(), "image/jpeg")}
+        async with self.running() as (app, pilot):
+            await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
+            app.query_one(Input).value = "https://weixin.qq.com/sph/fixture"
+            await pilot.press("enter")
+            await self.wait_for(pilot, started.is_set)
+            await pilot.press("ctrl+q")
+        archive = self.root / "downloads" / "中断测试"
+        self.assertEqual(next(archive.glob("*_图片_001.jpg")).read_bytes(), b"complete-first")
+        self.assertFalse(list(archive.glob("*_图片_002.jpg")))
+        self.assertFalse(list(archive.glob("*.part")))
+        self.assertEqual(len(list(archive.glob("*.json"))), 2)
+        self.assertIn("已中断", (archive / "index.html").read_text(encoding="utf-8"))
 
     async def test_missing_session_shows_qr_then_downloads_and_reuses_new_session(self):
         self.state.unlink()
@@ -236,8 +373,9 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         async with self.running() as (app, pilot):
             await self.submit(app, pilot)
             self.assertIn("完成", self.status(app))
-            text = next((self.root / "downloads").glob("*/正文.txt"))
-            self.assertEqual(text.read_text(encoding="utf-8"), "")
+            archive = self.root / "downloads" / "fixture"
+            self.assertEqual(next(archive.glob("*.jpg")).read_bytes(), b"image-only")
+            self.assertIn('<p id="description"></p>', (archive / "index.html").read_text(encoding="utf-8"))
 
     async def test_invalid_link_does_not_start_a_download(self):
         async with self.running() as (app, pilot):
@@ -245,7 +383,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("请输入", self.status(app))
             self.assertEqual(list((self.root / "downloads").iterdir()), [])
 
-    async def test_partial_download_is_not_published_and_existing_content_survives(self):
+    async def test_incomplete_media_is_removed_but_information_and_existing_content_survive(self):
         self.media_length = 1000
         existing = self.root / "downloads" / "existing"
         existing.mkdir(parents=True)
@@ -253,15 +391,72 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         async with self.running() as (app, pilot):
             await self.submit(app, pilot)
             self.assertIn("不完整", self.status(app))
-            self.assertEqual(list((self.root / "downloads").iterdir()), [existing])
+            archive = self.root / "downloads" / "测试视频"
+            self.assertIn("失败", self.status(app))
+            self.assertTrue((archive / "index.html").exists())
+            self.assertEqual(len(list(archive.glob("*.json"))), 2)
+            self.assertFalse(list(archive.glob("*.mp4")))
+            self.assertFalse(list(archive.glob("*.part")))
             self.assertEqual((existing / "video.mp4").read_bytes(), b"keep-me")
+
+    async def test_unknown_binary_content_is_not_mislabelled_as_a_video(self):
+        self.media = {"/video.mp4": (b"<html>not a video</html>", "application/octet-stream")}
+        async with self.running() as (app, pilot):
+            await self.submit(app, pilot)
+            self.assertIn("失败", self.status(app))
+            archive = self.root / "downloads" / "测试视频"
+            self.assertFalse(list(archive.glob("*.mp4")))
+            self.assertFalse(list(archive.glob("*.part")))
+
+    async def test_binary_video_header_can_span_network_chunks(self):
+        content = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00complete-video"
+
+        class FragmentedVideo(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                for byte in content:
+                    yield bytes([byte])
+
+        self.media = {"/video.mp4": (FragmentedVideo(), "application/octet-stream")}
+        async with self.running() as (app, pilot):
+            await self.submit(app, pilot)
+            self.assertNotIn("失败", self.status(app))
+            self.assertEqual(next((self.root / "downloads").glob("*/*.mp4")).read_bytes(), content)
+
+    async def test_archive_names_are_portable_and_repeated_downloads_preserve_safe_original_text(self):
+        self.parse_data["author"] = "发布/者"
+        body = '正文开头：' + '内容' * 150 + '\n<script>window.compromised=true</script>&原文'
+        self.feed["desc"] = body
+        async with self.running() as (app, pilot):
+            await self.submit(app, pilot)
+            first = next((self.root / "downloads").iterdir())
+            original = next(first.glob("*.mp4")).read_bytes()
+            await self.submit(app, pilot)
+            archives = list((self.root / "downloads").iterdir())
+            self.assertEqual(len(archives), 2)
+            second = next(path for path in archives if path != first)
+            self.assertEqual(second.name, first.name + "_2")
+            self.assertTrue(first.name.startswith("发布_者_正文开头："))
+            self.assertEqual(next(first.glob("*.mp4")).read_bytes(), original)
+            for file in self.root.rglob("*"):
+                self.assertLessEqual(len(file.name.encode("utf-8")), 255)
+                self.assertNotRegex(file.name, r'[<>:"/\\|?*\x00-\x1f]')
+            page = await app.session.context.new_page()
+            page.set_default_timeout(3000)
+            requests = []
+            page.on("request", lambda request: requests.append(request.url))
+            await page.goto((first / "index.html").as_uri())
+            self.assertEqual(await page.locator("#description").inner_text(), body)
+            self.assertTrue(await page.evaluate("window.compromised === undefined"))
+            self.assertTrue(all(url.startswith("file:") for url in requests))
 
     async def test_media_redirect_cannot_send_session_to_another_site(self):
         self.redirect = "https://evil.invalid/collect"
         async with self.running() as (app, pilot):
             await self.submit(app, pilot)
             self.assertIn("受支持", self.status(app))
-            self.assertEqual(list((self.root / "downloads").iterdir()), [])
+            archive = self.root / "downloads" / "测试视频"
+            self.assertFalse(list(archive.glob("*.mp4")))
+            self.assertTrue((archive / "index.html").exists())
             self.assertNotIn("test-secret", self.status(app))
 
     async def test_failed_session_save_preserves_previous_state(self):
@@ -284,6 +479,17 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             await self.wait_for(pilot, lambda: "失败" in self.status(app))
             self.assertTrue(app.query_one(Input).disabled)
             self.assertEqual((self.root / "data").read_bytes(), b"existing-file")
+
+    async def test_unwritable_archive_location_explains_storage_failure_without_overwrite(self):
+        async with self.running() as (app, pilot):
+            await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
+            downloads = self.root / "downloads"
+            downloads.rmdir()
+            downloads.write_bytes(b"preserve-existing-file")
+            await self.submit(app, pilot)
+            self.assertIn("写入", self.status(app))
+            self.assertIn("空间", self.status(app))
+            self.assertEqual(downloads.read_bytes(), b"preserve-existing-file")
 
     async def test_expired_qr_reports_failure_without_replacing_saved_session(self):
         self.login_mode = True
@@ -339,7 +545,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         async with self.running() as (app, pilot):
             await self.wait_for(pilot, lambda: "█" in str(app.query_one("#qr", Static).render()))
             self.scanned = True
-            await pilot.pause(1)
+            await self.wait_for(pilot, lambda: "额外安全验证" in self.status(app))
             self.assertIn("额外安全验证", self.status(app))
             self.assertEqual(self.state.read_bytes(), original)
 
@@ -355,4 +561,4 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         async with self.running() as (app, pilot):
             await self.submit(app, pilot)
             self.assertIn("完成", self.status(app))
-            self.assertEqual(next((self.root / "downloads").glob("*/001.jpg")).read_bytes(), b"jpeg-content")
+            self.assertEqual(next((self.root / "downloads").glob("*/*_图片_001.jpg")).read_bytes(), b"jpeg-content")

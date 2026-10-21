@@ -2,15 +2,17 @@
 
 [English](README.en.md)
 
-适用于 Windows、Linux 和 macOS 的便携式 TUI：检查元宝登录态，需要时展示微信二维码，输入 `https://weixin.qq.com/sph/...` 视频号分享链接后下载视频或图文。图文保存全部图片、顺序编号和正文；视频与图片均保留下载内容，不做转码或 OCR。
+适用于 Windows、Linux 和 macOS 的便携式 TUI：检查元宝登录态，需要时展示微信二维码，输入单条 `https://weixin.qq.com/sph/...` 视频号分享链接后归档动态。保存接口提供的全部视频版本、图文图片、封面、作者头像、认证图标与背景音乐，并生成离线 HTML 和两步解析的完整 JSON；媒体不转码，不做 OCR 或笔记生成。
 
 ## 使用便携包
 
 解压后保持整个目录完整，不需要安装 Python 或额外浏览器。Chromium 随包提供，包体积较大。
 
-- Windows：双击 `wechat-channels-downloader.exe`。
-- macOS：双击 `微信视频号下载.command`。包按 Intel / Apple Silicon 分别构建；未进行 Apple 签名或公证。
-- Ubuntu 桌面：使用 `微信视频号下载.desktop`。桌面环境可能要求先允许启动；需要系统具备 Chromium 所需的动态库。该入口的真实桌面双击行为仍需人工验收。
+- Windows：双击 `wechat-channels-downloader.exe`。独立控制台启动时优先转入 Windows Terminal，不可用或启动失败时留在系统控制台；不自动安装终端或改变系统默认设置。
+- macOS：双击 `wechat-channels-downloader.command`。包按 Intel / Apple Silicon 分别构建；未进行 Apple 签名或公证。
+- Ubuntu 桌面：使用 `wechat-channels-downloader.desktop`。桌面环境可能要求先允许启动；需要系统具备 Chromium 所需的动态库。该入口的真实桌面双击行为仍需人工验收。
+
+也可在终端直接运行 Windows 的 `./wechat-channels-downloader.exe`，或 Linux/macOS 的 `./wechat-channels-downloader`。已有终端直接复用，不额外打开 Windows Terminal，两种入口均进入同一 TUI。界面使用终端原生前景、背景和 ANSI 调色板，二维码区域保持黑白。
 
 Linux 服务器通过 SSH 使用时，在已分配终端的会话中进入解压目录，执行 `./wechat-channels-downloader`；从另一台机器直接启动可使用 `ssh -t 主机 'cd 解压目录 && ./wechat-channels-downloader'`。程序使用当前终端，不自带终端模拟器。
 
@@ -18,13 +20,25 @@ Linux 服务器通过 SSH 使用时，在已分配终端的会话中进入解压
 
 程序会等待页面的微信登录弹窗；弹窗自动出现时直接使用，未出现时尝试登录入口，避免点击被弹窗遮挡的首页按钮。
 
-在输入框粘贴单条分享链接，按 Enter 或点击“下载”。界面显示当前阶段及完成后的保存位置；失败后可修正链接，或使用“重新检查 / 扫码登录”。Ctrl+Q 退出。
+在输入框粘贴单条分享链接，按 Enter 或点击“下载”。界面显示当前阶段、结果及保存位置；失败后可修正链接，登录有问题时使用“重新检查 / 扫码登录”。Ctrl+Q 退出。
+
+每次归档在 `downloads/` 新建 `作者_正文摘要` 目录，允许中文；缺作者时省略，缺正文时回退分享标识。非法字符清理，长名称截短，原正文完整保留。媒体沿用此前缀并附用途、顺序或编码；重名时加序号，不覆盖旧下载。目录中包含：
+
+- 接口提供的媒体文件：所有不同视频版本、按序图片和其他附件；完全相同的地址只下载一次，扩展名根据实际媒体类型保存。
+- `index.html`：双击查看原正文、作者、UTC 时间、查询时的互动展示数量、其他可取得的信息与本地媒体。不依赖远端媒体地址；浏览器不支持某个编码时可使用页面中的文件链接交给本地播放器。
+- `yuanbao.json`、`feed.json`：分别保存元宝与视频号的完整解析响应；仅在已取得对应响应时生成。未知字段保留，不额外生成 TXT。
+
+资源齐全时显示“完成”；某项失败后继续处理其他资源，保留成果并显示“部分完成”，HTML 列出缺失项。全部媒体失败时仍保留已取得的信息并显示“失败”；正常退出中断下载时，保留完整文件和可保存的信息，HTML 标记“已中断”，未完成文件不作为有效媒体保留。再次下载会生成新目录。存储不可写时明确报错；强制杀进程或断电无法保证完成最后的记录。
+
+归档范围限于接口本次返回的内容；没有返回的可选资源自然省略，不承诺评论正文、上传前原片、独立字幕或完整账号历史。不同视频版本会额外占用磁盘空间。
 
 Linux/macOS 退出时会在 Playwright 子进程清理完成后恢复启动前的终端属性。使用旧包或强制终止后若输入命令不显示，可盲输入 `stty sane` 并回车；必要时再执行 `reset`，回车无反应时尝试 Ctrl+J。强制杀进程（如 SIGKILL）无法保证执行清理。
 
 登录态位于程序旁 `data/session.json`，内容位于 `downloads/`。macOS 若放入应用包，数据仍定位到包外侧。移动程序时可连同数据目录一起移动，但登录态仍需重新校验，不能保证跨机器或跨系统继续有效。目录不可写时明确报错，不静默改用其他位置。
 
 登录态及临时 `data/login-qr.png` 属于敏感本地数据；扫码结束后删除临时二维码。请勿上传、分享或提交数据目录。清除 `data/session.json` 可在下次启动重新扫码。
+
+归档 JSON 可能包含带访问参数和有效期的媒体地址，也应只在本地保留，不进入公共日志、仓库或分发包。元宝登录凭据不随媒体请求发送到其他域名。
 
 ## 源码运行
 
@@ -57,7 +71,7 @@ uv run --locked python tools/check_terminal.py "$PWD/.venv/bin/python" "$PWD/mai
 
 该命令通过 `--terminal-smoke-test` 启动离线临时会话并自动退出，不读取真实账户。打包脚本也会对 Linux/macOS 的实际可执行文件运行同一检查。
 
-构建脚本在当前平台生成 `dist/` 便携目录与压缩包，包含 Chromium、依赖及第三方声明。脚本会从其他工作目录执行打包产物的离线 smoke 检查，通过后才生成压缩包。不能从 Windows 交叉构建 macOS 或 Linux 包。
+构建脚本在当前平台生成 `dist/` 便携目录与压缩包，包含 Chromium、依赖及第三方声明。顶层仅保留双 README 使用文档，第三方声明和许可位于 `_internal/`，开发文档不随包分发；包内 README 的开发文档链接转向公开仓库。脚本会从其他工作目录执行打包产物的离线 smoke 检查，通过后才生成压缩包。不能从 Windows 交叉构建 macOS 或 Linux 包。
 
 macOS 构建将 Chromium 的完整应用目录及符号链接复制到包内，保留浏览器原有签名，避免 PyInstaller 重新处理其框架。
 
@@ -69,7 +83,7 @@ GitHub Actions 工作流覆盖 Ubuntu 24.04 x64、macOS 14 arm64、macOS 15 Inte
 
 ## 项目文档
 
-- [Spec #1](https://github.com/MuZiJin701/wechat-channels-downloader/issues/1) / [本地规格](docs/spec.md)
+- 完整归档与终端体验：[Spec #2](https://github.com/MuZiJin701/wechat-channels-downloader/issues/2) / [本地规格](docs/spec.md)；[初版 Spec #1](https://github.com/MuZiJin701/wechat-channels-downloader/issues/1)
 - [需求澄清记录](docs/requirements.md)、[词汇表](GLOSSARY.md)、[架构决策](docs/adr/)
 - [GitHub Issues](https://github.com/MuZiJin701/wechat-channels-downloader/issues) / [代理工作约定](AGENTS.md)
 - [第三方声明](THIRD_PARTY_NOTICES.md)：参考解析器包含 Commons Clause 条款，不应按无限制 MIT 对待。

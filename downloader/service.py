@@ -8,7 +8,6 @@ import io
 import math
 import os
 import re
-import shutil
 import tempfile
 from collections.abc import Awaitable, Callable
 from collections import Counter
@@ -20,6 +19,8 @@ import httpx
 from playwright.async_api import Browser, BrowserContext, Playwright, Response, TimeoutError as BrowserTimeoutError, async_playwright
 from PIL import Image
 from rich.text import Text
+
+from .archive import Archive, Media
 
 YUANBAO = "https://yuanbao.tencent.com/"
 USER_INFO = YUANBAO + "api/getuserinfo"
@@ -241,71 +242,153 @@ class Session:
         finally:
             temporary.unlink(missing_ok=True)
 
-    async def download(self, link: str, status: Callable[[str], None]) -> Path:
+    async def download(self, link: str, status: Callable[[str], None]) -> Archive:
         if not re.fullmatch(r"https://weixin\.qq\.com/sph/[A-Za-z0-9_-]+/?", link):
             raise UserError("请输入 https://weixin.qq.com/sph/... 视频号分享链接。")
         status("正在解析视频号内容…")
-        response = await self.client.post(PARSE_API, json={"type": "video_channel_url", "url": link, "scene": 1},
-                                          headers={"Cookie": await self.cookie(), "Referer": YUANBAO, "Origin": YUANBAO.rstrip("/")})
-        if response.status_code == 401:
-            raise UserError("登录态已过期，请重新登录后下载。")
-        response.raise_for_status()
-        value = response.json()
-        if value.get("code") != 0:
-            raise UserError("解析失败：元宝未能取得该视频号内容。")
-        playable = urlsplit(value["data"]["playable_url"])
-        if playable.scheme != "https" or playable.hostname != "channels.weixin.qq.com":
-            raise UserError("解析失败：视频号返回地址发生变化。")
-        query = parse_qs(playable.query)
-        response = await self.client.post(FEED_API, json={"baseReq": {"generalToken": query["token"][0]},
-                                                        "exportId": query["eid"][0]},
-                                          headers={"Referer": "https://channels.weixin.qq.com/finder-preview/pages/feed",
-                                                   "Origin": "https://channels.weixin.qq.com"})
-        response.raise_for_status()
-        payload = response.json()
-        error = payload.get("data", {}).get("errMsg") or {}
-        if (payload.get("errCode", 0) != 0 or not isinstance(error, dict)
-                or error.get("type", 0) != 0 or error.get("title") or error.get("content")):
-            raise UserError("解析失败：视频号内容不可用。")
-        feed: dict[str, Any] = payload["data"]["feedInfo"]
-        video = next((item.get("videoUrl") for item in (
-            feed.get("h264VideoInfo") or {}, feed.get("h265VideoInfo") or {}, feed
-        ) if isinstance(item, dict) and item.get("videoUrl")), None)
-        images = feed.get("picInfo") or []
-        if not video and not images and feed.get("coverUrl"):
-            images = [{"url": feed["coverUrl"]}]
-        if not video and not images:
-            raise UserError("解析失败：没有可下载的视频或图片。")
-        parent = self.root / "downloads"
-        temporary = Path(tempfile.mkdtemp(prefix=".partial-", dir=parent))
+        responses: dict[str, Any] = {}
+        first: dict[str, Any] = {}
+        feed: dict[str, Any] = {}
+        author_info: dict[str, Any] = {}
+        errors: list[str] = []
+        interrupted = False
         try:
-            if video:
-                status("正在下载视频…")
-                await self.save_media(video, temporary / "video", video=True)
+            response = await self.client.post(
+                PARSE_API, json={"type": "video_channel_url", "url": link, "scene": 1},
+                headers={"Cookie": await self.cookie(), "Referer": YUANBAO, "Origin": YUANBAO.rstrip("/")})
+            if response.status_code == 401:
+                raise UserError("登录态已过期，请重新登录后下载。")
+            response.raise_for_status()
+            value = response.json()
+            responses["yuanbao"] = value
+            if not isinstance(value, dict) or value.get("code") != 0 or not isinstance(value.get("data"), dict):
+                raise UserError("解析失败：元宝未能取得该视频号内容。")
+            first = value["data"]
+            if not isinstance(first.get("playable_url"), str):
+                raise UserError("解析失败：视频号返回地址发生变化。")
+            playable = urlsplit(first["playable_url"])
+            if (playable.scheme != "https" or playable.hostname != "channels.weixin.qq.com"
+                    or playable.username or playable.password or playable.port not in (None, 443)):
+                raise UserError("解析失败：视频号返回地址发生变化。")
+            query = parse_qs(playable.query)
+            if not query.get("token") or not query.get("eid"):
+                raise UserError("解析失败：缺少视频号访问参数。")
+            response = await self.client.post(
+                FEED_API, json={"baseReq": {"generalToken": query["token"][0]}, "exportId": query["eid"][0]},
+                headers={"Referer": "https://channels.weixin.qq.com/finder-preview/pages/feed",
+                         "Origin": "https://channels.weixin.qq.com"})
+            response.raise_for_status()
+            payload = response.json()
+            responses["feed"] = payload
+            if not isinstance(payload, dict) or not isinstance(payload.get("data"), dict):
+                raise UserError("解析失败：视频号响应格式发生变化。")
+            data = payload["data"]
+            error = data.get("errMsg") or {}
+            if (payload.get("errCode", 0) != 0 or not isinstance(error, dict)
+                    or error.get("type", 0) != 0 or error.get("title") or error.get("content")):
+                raise UserError("解析失败：视频号内容不可用。")
+            if not isinstance(data.get("feedInfo"), dict):
+                raise UserError("解析失败：动态信息格式发生变化。")
+            feed = data["feedInfo"]
+            author = data.get("authorInfo") or {}
+            if isinstance(author, dict):
+                author_info = author
             else:
-                for index, image in enumerate(images, 1):
-                    status(f"正在下载图片 {index}/{len(images)}…")
-                    await self.save_media(image["url"], temporary / f"{index:03d}", video=False)
-            description = feed.get("description") or feed.get("desc") or feed.get("title") or ""
-            if not isinstance(description, str):
-                raise UserError("解析失败：图文正文格式发生变化。")
-            (temporary / "正文.txt").write_text(description, encoding="utf-8")
-            destination = parent / ("内容-" + temporary.name.removeprefix(".partial-"))
-            os.rename(temporary, destination)
-            return destination
-        finally:
-            if temporary.exists():
-                shutil.rmtree(temporary)
+                errors.append("作者信息格式发生变化。")
+        except asyncio.CancelledError:
+            interrupted = True
+        except Exception as error:
+            if not responses:
+                raise
+            errors.append(str(error) if isinstance(error, UserError) else f"解析失败（{type(error).__name__}）")
+        if not responses:
+            raise asyncio.CancelledError
+        description = feed.get("description") or feed.get("desc") or feed.get("title") or first.get("desc") or ""
+        if not isinstance(description, str):
+            errors.append("图文正文格式发生变化。")
+            description = ""
+        author = author_info.get("nickname") or feed.get("nickname") or feed.get("authorName") or first.get("author") or ""
+        if not isinstance(author, str):
+            errors.append("作者名称格式发生变化。")
+            author = ""
+        archive = Archive(self.root / "downloads", description, author, link.rstrip("/").rsplit("/", 1)[-1])
+        archive.responses = responses
+        archive.information = feed
+        archive.errors = errors
 
-    async def save_media(self, url: str, destination: Path, *, video: bool) -> None:
+        def add(label: str, kind: str, url: Any) -> None:
+            if url is None or url == "":
+                return
+            if isinstance(url, str):
+                archive.media.append(Media(label, kind, url))
+            else:
+                archive.errors.append(f"{label}地址格式发生变化。")
+
+        for key, label in (("h264VideoInfo", "视频 h264"), ("h265VideoInfo", "视频 h265")):
+            video = feed.get(key)
+            if isinstance(video, dict):
+                add(label, "video", video.get("videoUrl"))
+            elif video is not None:
+                archive.errors.append(f"{label}信息格式发生变化。")
+        add("视频", "video", feed.get("videoUrl"))
+        images = feed.get("picInfo") or []
+        if not isinstance(images, list):
+            archive.errors.append("图片列表格式发生变化。")
+            images = []
+        for index, image in enumerate(images, 1):
+            if isinstance(image, dict):
+                add(f"图片 {index:03d}", "image", image.get("url"))
+            else:
+                archive.errors.append(f"图片 {index:03d}信息格式发生变化。")
+        for label, primary, secondary in (("封面", feed.get("coverUrl"), first.get("cover_url")),
+                                           ("头像", author_info.get("headImgUrl"), first.get("author_icon")),
+                                           ("认证图标", author_info.get("authIconUrl"), first.get("author_certification_icon"))):
+            add(label, "image", primary)
+            if secondary != primary:
+                add(label + " 元宝", "image", secondary)
+        bgm = feed.get("bgmInfo")
+        if isinstance(bgm, dict):
+            add("背景音乐", "audio", bgm.get("bgmUrl"))
+            if bgm.get("mediaStreamingUrl") != bgm.get("bgmUrl"):
+                add("背景音乐 备用", "audio", bgm.get("mediaStreamingUrl"))
+        elif bgm is not None:
+            archive.errors.append("背景音乐信息格式发生变化。")
+        saved: dict[str, Path] = {}
+        failed: dict[str, str] = {}
+        try:
+            if interrupted:
+                raise asyncio.CancelledError
+            for item in archive.media:
+                status(f"正在下载{item.label}…")
+                if item.url not in saved and item.url not in failed:
+                    try:
+                        saved[item.url] = await self.save_media(
+                            item.url, archive.path / f"{archive.name}_{item.label.replace(' ', '_')}", kind=item.kind)
+                    except Exception as error:
+                        failed[item.url] = (str(error) if isinstance(error, UserError)
+                                            else f"下载失败（{type(error).__name__}）")
+                item.path = saved.get(item.url)
+                item.error = failed.get(item.url, "")
+            archive.state = "部分完成" if saved and (failed or archive.errors) else "完成" if saved else "失败"
+            if not archive.media:
+                archive.errors.append("没有可下载的视频、图片或音频。")
+        finally:
+            archive.write()
+        return archive
+
+    async def save_media(self, url: str, destination: Path, *, kind: str) -> Path:
         for _ in range(6):
             parts = urlsplit(url)
+            if (kind == "audio" and parts.scheme == "http" and parts.hostname == "wx.music.tc.qq.com"
+                    and not parts.username and not parts.password and parts.port in (None, 80)):
+                parts = parts._replace(scheme="https", netloc="wx.music.tc.qq.com")
+                url = urlunsplit(parts)
             host = parts.hostname or ""
             if (parts.scheme != "https" or parts.username or parts.password or parts.port not in (None, 443)
                     or not any(host == suffix or host.endswith("." + suffix)
                                for suffix in ("qq.com", "weixin.qq.com", "qpic.cn", "qlogo.cn", "gtimg.com"))):
                 raise UserError("下载失败：媒体地址不是受支持的腾讯 HTTPS 地址。")
-            if video and "X-snsvideoflag" in parse_qs(parts.query):
+            if kind == "video" and "X-snsvideoflag" in parse_qs(parts.query):
                 query = urlencode([(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True)
                                    if key != "X-snsvideoflag"])
                 url = urlunsplit(parts._replace(query=query))
@@ -314,18 +397,36 @@ class Session:
                     url = urljoin(url, media.headers["location"])
                     continue
                 media.raise_for_status()
-                mime = media.headers.get("content-type", "").split(";", 1)[0].lower()
-                extensions = ({"video/mp4": ".mp4", "video/webm": ".webm", "application/octet-stream": ".mp4"}
-                              if video else {"image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png", "image/webp": ".webp",
-                                             "image/gif": ".gif", "image/avif": ".avif"})
-                if mime not in extensions:
-                    raise UserError("下载失败：媒体服务返回的不是有效视频或图片。")
-                size = 0
-                with destination.with_suffix(extensions[mime]).open("xb") as output:
-                    async for chunk in media.aiter_bytes():
-                        size += output.write(chunk)
-                expected = media.headers.get("content-length")
-                if not size or (expected and not media.headers.get("content-encoding") and size != int(expected)):
-                    raise UserError("下载失败：媒体文件不完整。")
-                return
+                mime = media.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                stream = media.aiter_bytes()
+                head = await anext(stream, b"")
+                while mime == "application/octet-stream" and len(head) < 12:
+                    chunk = await anext(stream, b"")
+                    if not chunk:
+                        break
+                    head += chunk
+                extensions = {"video": {"video/mp4": ".mp4", "video/webm": ".webm"},
+                              "audio": {"audio/mp4": ".m4a", "audio/x-m4a": ".m4a", "audio/mpeg": ".mp3", "audio/aac": ".aac",
+                                        "audio/ogg": ".ogg", "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/flac": ".flac"},
+                              "image": {"image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png", "image/webp": ".webp",
+                                        "image/gif": ".gif", "image/avif": ".avif"}}[kind]
+                extension = extensions.get(mime)
+                if kind == "video" and mime == "application/octet-stream":
+                    extension = ".mp4" if head[4:8] == b"ftyp" else ".webm" if head.startswith(b"\x1aE\xdf\xa3") else None
+                if extension is None:
+                    raise UserError("下载失败：媒体服务返回的不是受支持的媒体格式。")
+                target = Path(str(destination) + extension)
+                temporary = Path(str(target) + ".part")
+                try:
+                    with temporary.open("xb") as output:
+                        size = output.write(head)
+                        async for chunk in stream:
+                            size += output.write(chunk)
+                    expected = media.headers.get("content-length")
+                    if not size or (expected and not media.headers.get("content-encoding") and size != int(expected)):
+                        raise UserError("下载失败：媒体文件不完整。")
+                    temporary.rename(target)
+                finally:
+                    temporary.unlink(missing_ok=True)
+                return target
         raise UserError("下载失败：媒体重定向次数过多。")

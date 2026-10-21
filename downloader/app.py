@@ -39,6 +39,7 @@ class DownloaderApp(App[None]):
     def __init__(self, *, root: Path | None = None, transport: httpx.AsyncBaseTransport | None = None,
                  browser_setup: BrowserSetup | None = None) -> None:
         super().__init__()
+        self.theme = "ansi-dark"
         self.session = Session(root or application_root(), transport, browser_setup)
         self.approval = asyncio.Event()
 
@@ -124,10 +125,13 @@ class DownloaderApp(App[None]):
         self.query_one(Input).disabled = True
         self.query_one("#download", Button).disabled = True
         try:
-            destination = await self.session.download(link, self.show_status)
-            self.show_status(f"下载完成：{destination}")
+            archive = await self.session.download(link, self.show_status)
+            errors = archive.errors + [f"{item.label}：{item.error}" for item in archive.media if item.error]
+            self.show_status(f"下载{archive.state}：{archive.path}" + ("；" + "；".join(errors) if errors else ""))
         except Exception as error:
-            self.show_status(str(error) if isinstance(error, UserError) else "解析或下载失败，请检查网络后重试。")
+            message = ("保存失败：请检查程序旁下载目录的写入权限和可用空间；已有文件保留。" if isinstance(error, OSError)
+                       else str(error) if isinstance(error, UserError) else "解析或下载失败，请检查网络后重试。")
+            self.show_status(message)
             self.query_one("#retry").display = True
         finally:
             self.query_one(Input).disabled = False

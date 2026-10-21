@@ -4,6 +4,8 @@
 
 状态：历史记录。验收边界已在 [Spec #1](https://github.com/MuZiJin701/wechat-channels-downloader/issues/1) 中确认；当前实现与验证情况见 [README](../README.md)。
 
+实现后的 Linux 服务器排查发现登录弹窗时序与退出后终端回显问题；后续修正及真实 PTY 验证见[本地规格补充](spec.md)和[验证记录](validation.md)。以下保留原始需求澄清历史。
+
 ## 需求澄清阶段的交付范围（已结束）
 
 本次只按 `grill-with-docs` 完成需求澄清、词汇表和必要决策文档。下述程序行为与验证方式是未来项目的需求，不是本次执行事项。本次不编写应用、不安装依赖、不进行真实扫码或下载、不创建 GitHub 仓库、不提交或推送代码、不运行 GitHub Actions。

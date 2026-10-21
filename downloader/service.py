@@ -17,7 +17,7 @@ from typing import Any
 from urllib.parse import parse_qs, parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
-from playwright.async_api import Browser, BrowserContext, Playwright, Response, async_playwright
+from playwright.async_api import Browser, BrowserContext, Playwright, Response, TimeoutError as BrowserTimeoutError, async_playwright
 from PIL import Image
 from rich.text import Text
 
@@ -135,9 +135,20 @@ class Session:
                     confirm: Callable[[], None], approval: asyncio.Event) -> None:
         assert self.context is not None
         page = self.context.pages[0]
-        if not await page.get_by_text("微信登录", exact=True).count():
-            await page.get_by_role("button", name="登录", exact=True).click(timeout=10000)
-            await page.get_by_text("微信", exact=True).click(timeout=5000)
+        status("正在等待元宝微信登录界面…")
+        login_deadline = asyncio.get_running_loop().time() + 15
+        while not await page.get_by_text("微信登录", exact=True).is_visible():
+            if asyncio.get_running_loop().time() >= login_deadline:
+                raise UserError("登录失败：未等到元宝微信登录界面，请检查网络或稍后重试。")
+            try:
+                if await page.get_by_text("微信", exact=True).is_visible():
+                    await page.get_by_text("微信", exact=True).click(timeout=500)
+                else:
+                    await page.get_by_role("button", name="登录", exact=True).click(timeout=500)
+            except BrowserTimeoutError:
+                # An automatically opened login dialog can cover the homepage button during the click.
+                pass
+            await asyncio.sleep(0.1)
         status("请用微信扫码，并在手机上确认元宝登录。等待最多 3 分钟。")
         deadline = asyncio.get_running_loop().time() + 180
         displayed = ""

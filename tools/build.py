@@ -61,6 +61,9 @@ def main() -> None:
     binary = package / (NAME + (".exe" if system == "windows" else ""))
     with tempfile.TemporaryDirectory() as working_directory:
         subprocess.run([str(binary), "--smoke-test"], cwd=working_directory, check=True, timeout=120)
+        if os.name == "posix":
+            subprocess.run([sys.executable, str(ROOT / "tools" / "check_terminal.py"), str(binary)],
+                           cwd=working_directory, check=True, timeout=90)
     assert not (package / "data").exists(), "Smoke check must not ship login state"
     assert not (package / "downloads").exists(), "Smoke check must not ship downloaded content"
     machine = platform.machine().lower()

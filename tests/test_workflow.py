@@ -40,6 +40,8 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.feed_error = None
         self.guest_initial = False
         self.additional_verification = False
+        self.delayed_login_dialog = False
+        self.login_entry_required = False
 
     async def browser_setup(self, context):
         async def route(request):
@@ -63,6 +65,25 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                         if ((await (await fetch('/fixture/scanned')).json()).scanned)
                             fetch('/api/joint/login', {method:'POST'});
                     }, 100);</script>'''
+                if self.delayed_login_dialog:
+                    await request.fulfill(content_type="text/html; charset=utf-8", body='''<button>登录</button>
+                        <div id="overlay" style="position:fixed;inset:0;z-index:10;background:white"></div>
+                        <script>setTimeout(() => {
+                            document.querySelector('#overlay').innerHTML = '<h2>微信登录</h2>' +
+                                '<iframe src="https://open.weixin.qq.com/connect/qrconnect"></iframe>';
+                        }, 300);</script>''')
+                    return
+                if self.login_entry_required:
+                    await request.fulfill(content_type="text/html; charset=utf-8", body='''
+                        <button id="login">登录</button><div id="dialog"></div><script>
+                        document.querySelector('#login').onclick = () => {
+                            document.querySelector('#dialog').innerHTML = '<button id="wechat">微信</button>';
+                            document.querySelector('#wechat').onclick = () => {
+                                document.querySelector('#dialog').innerHTML = '<h2>微信登录</h2>' +
+                                    '<iframe src="https://open.weixin.qq.com/connect/qrconnect"></iframe>';
+                            };
+                        };</script>''')
+                    return
                 await request.fulfill(content_type="text/html; charset=utf-8", body=registration + '''<html><button>微信登录</button>
                     <iframe src="https://open.weixin.qq.com/connect/qrconnect"></iframe>
                     <script>setInterval(async () => {
@@ -178,6 +199,23 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             await self.wait_for(pilot, lambda: "失败" in self.status(app) or "有效" in self.status(app))
             self.assertTrue(app.query_one(Input).disabled)
             self.assertEqual(self.state.read_bytes(), original)
+
+    async def test_delayed_automatic_login_dialog_shows_qr_without_clicking_behind_it(self):
+        self.state.unlink()
+        self.login_mode = True
+        self.delayed_login_dialog = True
+        async with self.running() as (app, pilot):
+            await self.wait_for(pilot, lambda: "█" in str(app.query_one("#qr", Static).render()))
+            self.assertFalse(self.state.exists())
+            self.assertTrue(app.query_one(Input).disabled)
+
+    async def test_login_entry_and_wechat_tab_can_still_be_opened(self):
+        self.state.unlink()
+        self.login_mode = True
+        self.login_entry_required = True
+        async with self.running() as (app, pilot):
+            await self.wait_for(pilot, lambda: "█" in str(app.query_one("#qr", Static).render()))
+            self.assertFalse(self.state.exists())
 
     async def test_network_failure_preserves_session_and_retry_recovers(self):
         self.info_status = 503

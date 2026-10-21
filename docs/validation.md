@@ -13,14 +13,18 @@ Linux 服务器（Ubuntu 24.04.5 x64）实际复现：元宝首页约 1 秒加�
 | 类型检查 | 通过 | mypy strict，7 个源文件；另以 Linux/macOS 平台配置检查 POSIX 分支 |
 | Windows 回归 | 通过 | 23 项中 22 项通过，1 项 POSIX PTY 检查明确跳过；新增延迟自动弹窗和主动登录入口流程 |
 | Windows 修正版便携包 | 通过 | 构建完成；从其他工作目录运行包内 Chromium / TUI 离线检查；归档不含 data/downloads |
-| Linux/macOS 修正版 CI | 待执行 | 完整 23 项、源码真实 PTY、打包产物真实 PTY 与浏览器离线检查 |
-| Linux 服务器修正版实机 | 待执行 | 使用新构建产物检查真实二维码出现与 Ctrl+Q 退出后的终端恢复；不自动扫码登录 |
+| Linux/macOS 修正版 CI | 通过 | Ubuntu 24.04 x64、macOS 14 arm64、macOS 15 Intel 各完整 23 项全部通过，无跳过；源码真实 PTY、打包产物真实 PTY 与浏览器离线检查全部通过，压缩包已上传 |
+| Linux 服务器修正版实机 | 通过 | 新包约 6.16 秒出现真实微信二维码；Ctrl+Q 正常退出，无 TimeoutError；全部 termios 配置与启动前一致，ECHO/ICANON 均启用，退出后写入文字确认正常回显；二维码已删除，没有扫码或保存账户 |
 
 `tools/check_terminal.py` 创建独立 PTY，用 `--terminal-smoke-test` 运行源码或实际便携程序；使用临时会话及模拟外部服务，观察真实屏幕模式、Ctrl+Q 退出与完整 termios 属性一致性。构建中任何一项失败都会阻止归档和上传。旧包受影响的终端可用 `stty sane` 恢复；强制杀进程或 SSH 断开无法保证完成清理。
 
 首轮新增 PTY 检查发现 macOS 的 lflag 差异恰为 `0x20000000`（PENDIN）；回显、按行输入、速度与全部控制字符已经恢复。此位是 [XNU 定义的待处理输入状态](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/termios.h)，[恢复 ICANON 时由内核自动设置](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/tty.c)。因此仅在 macOS 比较配置时排除此状态位，保留其余全部属性检查，不修改程序的实际恢复逻辑。
 
 本轮 Standards 与 Spec 两个审查轴均无新增可行动问题。旧 Windows 程序及其本地数据整体保留在单独目录；新包不携带个人数据。
+
+服务器实机验证使用 `23e900b` 的 Linux 产物；后续 `7bb132a`、`96244f4` 只调整检查诊断、macOS PENDIN 状态比较及文档，应用实现相同。新包解压到独立目录，原安装目录未覆盖。
+
+最终远程验证：[Actions 39600651065](https://github.com/MuZiJin701/wechat-channels-downloader/actions/runs/39600651065)，提交 `96244f4`，三个平台均通过。Linux/macOS 各架构压缩包位于该运行的 Artifacts；首轮失败已通过终端状态诊断查明为上述 PENDIN 比较问题。此后的结果记录仅修改文档，使用 `[skip ci]` 提交，应用及检查代码不变。
 
 ## 初版验证（历史）
 

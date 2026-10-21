@@ -28,14 +28,19 @@ def main() -> None:
         executable = Path(playwright.chromium.executable_path)
     browser = next(path for path in executable.parents if re.fullmatch(r"chromium-\d+", path.name))
     assert executable.is_file(), "Managed Chromium is missing"
+    browser_arguments = [] if sys.platform == "darwin" else [
+        "--add-data", f"{browser}{os.pathsep}browsers/{browser.name}"]
     subprocess.run([
         sys.executable, "-m", "PyInstaller", "--noconfirm", "--onedir", "--name", NAME,
         "--distpath", str(ROOT / "dist"), "--workpath", str(ROOT / "build" / "pyinstaller"),
         "--specpath", str(ROOT / "build"), "--collect-all", "textual", "--collect-all", "playwright",
         "--recursive-copy-metadata", "textual", "--recursive-copy-metadata", "playwright",
         "--recursive-copy-metadata", "httpx", "--recursive-copy-metadata", "pillow",
-        "--add-data", f"{browser}{os.pathsep}browsers/{browser.name}", str(ROOT / "main.py"),
+        *browser_arguments, str(ROOT / "main.py"),
     ], cwd=ROOT, check=True)
+    if sys.platform == "darwin":
+        # Preserve Chromium's signed app bundle and framework symlinks without PyInstaller rewriting its binaries.
+        shutil.copytree(browser, package / "_internal" / "browsers" / browser.name, symlinks=True)
     for document in ("README.md", "README.en.md", "THIRD_PARTY_NOTICES.md", "AGENTS.md", "GLOSSARY.md"):
         shutil.copy2(ROOT / document, package / document)
     shutil.copytree(ROOT / "licenses", package / "licenses", dirs_exist_ok=True)

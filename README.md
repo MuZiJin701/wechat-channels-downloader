@@ -49,7 +49,7 @@ uv run --locked python tools/build.py
 
 自动化通过 TUI 用户流程运行真实无头 Chromium，只模拟元宝、微信和媒体等外部服务，并使用临时目录。离线 smoke 检查也不加载真实账户或访问外网。
 
-Linux/macOS 的完整测试额外创建真实 PTY：启动离线 TUI、启动 Chromium、按 Ctrl+Q 退出，并检查回显、按行输入及其他终端属性与启动前完全一致。Windows 明确跳过该 POSIX 检查。单独运行源码检查：
+Linux/macOS 的完整测试额外创建真实 PTY：启动离线 TUI、启动 Chromium、按 Ctrl+Q 退出，并检查回显、按行输入及其他终端配置与启动前一致；macOS 仅排除内核自动设置的 PENDIN 待处理输入状态位。Windows 明确跳过该 POSIX 检查。单独运行源码检查：
 
 ```sh
 uv run --locked python tools/check_terminal.py "$PWD/.venv/bin/python" "$PWD/main.py"

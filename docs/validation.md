@@ -18,6 +18,8 @@ Linux 服务器（Ubuntu 24.04.5 x64）实际复现：元宝首页约 1 秒加�
 
 `tools/check_terminal.py` 创建独立 PTY，用 `--terminal-smoke-test` 运行源码或实际便携程序；使用临时会话及模拟外部服务，观察真实屏幕模式、Ctrl+Q 退出与完整 termios 属性一致性。构建中任何一项失败都会阻止归档和上传。旧包受影响的终端可用 `stty sane` 恢复；强制杀进程或 SSH 断开无法保证完成清理。
 
+首轮新增 PTY 检查发现 macOS 的 lflag 差异恰为 `0x20000000`（PENDIN）；回显、按行输入、速度与全部控制字符已经恢复。此位是 [XNU 定义的待处理输入状态](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/sys/termios.h)，[恢复 ICANON 时由内核自动设置](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/tty.c)。因此仅在 macOS 比较配置时排除此状态位，保留其余全部属性检查，不修改程序的实际恢复逻辑。
+
 本轮 Standards 与 Spec 两个审查轴均无新增可行动问题。旧 Windows 程序及其本地数据整体保留在单独目录；新包不携带个人数据。
 
 ## 初版验证（历史）

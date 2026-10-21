@@ -49,7 +49,7 @@ uv run --locked python tools/build.py
 
 Tests exercise the TUI workflow with real headless Chromium, temporary directories, and simulated external Yuanbao, WeChat, and media services. Offline smoke checks neither use real accounts nor access the internet.
 
-On Linux/macOS, the full suite also opens a real PTY, starts the offline TUI and Chromium, presses Ctrl+Q, and checks that echo, canonical input, and all other terminal attributes match their original values. Windows explicitly skips this POSIX check. To check the source entry separately:
+On Linux/macOS, the full suite also opens a real PTY, starts the offline TUI and Chromium, presses Ctrl+Q, and checks that echo, canonical input, and all other terminal settings match their original values. On macOS only, it excludes the kernel-managed PENDIN pending-input state bit. Windows explicitly skips this POSIX check. To check the source entry separately:
 
 ```sh
 uv run --locked python tools/check_terminal.py "$PWD/.venv/bin/python" "$PWD/main.py"

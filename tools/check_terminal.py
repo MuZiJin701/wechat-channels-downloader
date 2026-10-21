@@ -42,6 +42,10 @@ def check_terminal(command: list[str]) -> None:
         assert b"\x1b[?1049h" in output, "Check did not enter the real terminal screen"
         assert b"SMOKE_OK" in output, "Offline browser/TUI check did not complete"
         after = termios.tcgetattr(slave)
+        if sys.platform == "darwin":
+            # XNU sets PENDIN when restoring canonical input; it is pending-input state, not a setting.
+            before[3] &= ~termios.PENDIN
+            after[3] &= ~termios.PENDIN
         assert after == before, f"TUI exit changed terminal attributes: before={before!r}, after={after!r}"
     finally:
         os.close(master)

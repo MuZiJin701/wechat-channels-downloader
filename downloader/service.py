@@ -1,0 +1,320 @@
+"""Local browser session, fixed upstream APIs and transactional downloads."""
+
+from __future__ import annotations
+
+import json
+import asyncio
+import io
+import math
+import os
+import re
+import shutil
+import tempfile
+from collections.abc import Awaitable, Callable
+from collections import Counter
+from pathlib import Path
+from typing import Any
+from urllib.parse import parse_qs, parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
+
+import httpx
+from playwright.async_api import Browser, BrowserContext, Playwright, Response, async_playwright
+from PIL import Image
+from rich.text import Text
+
+YUANBAO = "https://yuanbao.tencent.com/"
+USER_INFO = YUANBAO + "api/getuserinfo"
+PARSE_API = YUANBAO + "api/weixin/get_parse_result"
+FEED_API = "https://channels.weixin.qq.com/finder-preview/api/feed/get_feed_info"
+TERMS = "https://rule.tencent.com/rule/202403110001"
+PRIVACY = "https://privacy.qq.com/document/preview/eb9be56572ab4886b6ca124e72abf413"
+BrowserSetup = Callable[[BrowserContext], Awaitable[None]]
+
+
+class UserError(Exception):
+    """A message safe to display without upstream URLs or credentials."""
+
+
+def terminal_qr(data: bytes) -> Text:
+    # Module detection and half-block rendering adapted from wx-video-account-notes (MIT).
+    with Image.open(io.BytesIO(data)) as image:
+        if image.width != image.height or not 21 <= image.width <= 1000:
+            raise UserError("登录失败：二维码图片格式发生变化。")
+        rgba = image.convert("RGBA")
+        background = Image.new("RGBA", rgba.size, "white")
+        gray = Image.alpha_composite(background, rgba).convert("L")
+        pixels = gray.tobytes()
+        rows = [[pixels[y * image.width + x] < 128 for x in range(image.width)] for y in range(image.height)]
+    runs: Counter[int] = Counter()
+    for row in rows:
+        start = 0
+        for x in range(1, len(row) + 1):
+            if x == len(row) or row[x] != row[start]:
+                if row[start]:
+                    runs[x - start] += 1
+                start = x
+    unit = math.gcd(*(length for length, count in runs.items() if count >= 3))
+    if unit < 1 or len(rows) % unit or not 21 <= len(rows) // unit <= 110:
+        raise UserError("登录失败：无法识别二维码像素，请重试。")
+    grid = [[row[x] for x in range(unit // 2, len(row), unit)] for row in rows[unit // 2::unit]]
+    blank = [False] * (len(grid[0]) + 8)
+    grid = [blank[:] for _ in range(4)] + [[False] * 4 + row + [False] * 4 for row in grid] + [blank[:] for _ in range(4)]
+    if len(grid) % 2:
+        grid.append(blank[:])
+    chars = {(False, False): " ", (True, False): "▀", (False, True): "▄", (True, True): "█"}
+    return Text("\n".join("".join(chars[a, b] for a, b in zip(grid[y], grid[y + 1]))
+                          for y in range(0, len(grid), 2)), style="black on white", no_wrap=True)
+
+
+class Session:
+    def __init__(self, root: Path, transport: httpx.AsyncBaseTransport | None = None,
+                 browser_setup: BrowserSetup | None = None) -> None:
+        self.root = root
+        self.transport = transport
+        self.browser_setup = browser_setup
+        self.playwright: Playwright | None = None
+        self.browser: Browser | None = None
+        self.context: BrowserContext | None = None
+        self.client = httpx.AsyncClient(transport=transport, timeout=30, follow_redirects=False)
+        self.media_client = httpx.AsyncClient(transport=transport, timeout=60, follow_redirects=False)
+
+    async def open(self) -> None:
+        for name in ("data", "downloads"):
+            folder = self.root / name
+            folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+            with tempfile.TemporaryFile(dir=folder):
+                pass
+        self.playwright = await async_playwright().start()
+        self.browser = await self.playwright.chromium.launch(
+            channel="chromium", headless=True, ignore_default_args=["--enable-logging"])
+        state = self.root / "data" / "session.json"
+        self.context = await self.browser.new_context(
+            storage_state=str(state) if state.exists() else None, locale="zh-CN")
+        if self.browser_setup:
+            await self.browser_setup(self.context)
+        page = await self.context.new_page()
+        await page.goto(YUANBAO, wait_until="domcontentloaded", timeout=45000)
+
+    async def close(self) -> None:
+        try:
+            if self.browser:
+                await self.browser.close()
+        finally:
+            if self.playwright:
+                await self.playwright.stop()
+            await self.client.aclose()
+            await self.media_client.aclose()
+
+    async def cookie(self) -> str:
+        assert self.context is not None
+        return "; ".join(f"{item['name']}={item['value']}" for item in await self.context.cookies(PARSE_API))
+
+    async def authenticated(self) -> bool:
+        cookie = await self.cookie()
+        if not cookie:
+            return False
+        response = await self.client.get(USER_INFO, headers={"Cookie": cookie, "Referer": YUANBAO})
+        if response.status_code == 401:
+            return False
+        if response.status_code != 200:
+            raise UserError("暂时无法检查登录态，请检查网络后重试；已保存的登录态未修改。")
+        try:
+            identity = response.json()
+        except ValueError:
+            raise UserError("登录检查失败：元宝返回内容无法确认身份，已保存的登录态未修改。") from None
+        if not isinstance(identity, dict) or not identity or identity.get("code", 0) not in (0, 200):
+            raise UserError("登录检查失败：元宝身份响应发生变化，已保存的登录态未修改。")
+        anonymous = identity.get("anonUser")
+        if isinstance(anonymous, dict) and anonymous.get("isAnon") is True:
+            return False
+        if (not isinstance(identity.get("userId"), str) or not identity["userId"].strip()
+                or not isinstance(anonymous, dict) or anonymous.get("isAnon") is not False):
+            raise UserError("登录检查失败：未取得可确认的非访客身份，已保存的登录态未修改。")
+        return True
+
+    async def login(self, status: Callable[[str], None], qr: Callable[[Text], None],
+                    confirm: Callable[[], None], approval: asyncio.Event) -> None:
+        assert self.context is not None
+        page = self.context.pages[0]
+        if not await page.get_by_text("微信登录", exact=True).count():
+            await page.get_by_role("button", name="登录", exact=True).click(timeout=10000)
+            await page.get_by_text("微信", exact=True).click(timeout=5000)
+        status("请用微信扫码，并在手机上确认元宝登录。等待最多 3 分钟。")
+        deadline = asyncio.get_running_loop().time() + 180
+        displayed = ""
+        next_check = 0.0
+        failure = ""
+
+        async def received(response: Response) -> None:
+            nonlocal failure
+            target = urlsplit(response.url)
+            if target.hostname == "yuanbao.tencent.com" and target.path == "/api/joint/login" and response.status >= 400:
+                message = "登录失败：元宝拒绝本次登录，请重新登录。"
+                try:
+                    if (await response.json()).get("safeVerifyTypes"):
+                        message = "登录失败：元宝要求额外安全验证，当前无法继续，请稍后重试。"
+                except Exception:
+                    pass
+                failure = message
+
+        page.on("response", received)
+        try:
+            while asyncio.get_running_loop().time() < deadline:
+                if failure:
+                    raise UserError(failure)
+                now = asyncio.get_running_loop().time()
+                if now >= next_check:
+                    if await self.authenticated():
+                        await self.save_state()
+                        return
+                    next_check = now + 2
+                for frame in page.frames:
+                    host = urlsplit(frame.url).hostname or ""
+                    if host.endswith(("captcha.qq.com", "captcha.qcloud.com")):
+                        raise UserError("登录失败：元宝要求额外安全验证，当前无法继续，请稍后重试。")
+                    if host != "open.weixin.qq.com":
+                        continue
+                    if await frame.locator(".js_wx_after_cancel:visible").count():
+                        raise UserError("登录失败：手机端已取消，请重新登录。")
+                    image = frame.locator("img.qrcode.js_qrcode_img:visible").first
+                    if await image.count():
+                        source = urljoin("https://open.weixin.qq.com/", await image.get_attribute("src") or "")
+                        target = urlsplit(source)
+                        if (target.scheme != "https" or target.hostname != "open.weixin.qq.com" or target.username
+                                or target.password or target.port not in (None, 443)
+                                or not target.path.startswith("/connect/qrcode/")):
+                            raise UserError("登录失败：微信二维码来源发生变化。")
+                        if source != displayed:
+                            response = await self.media_client.get(source)
+                            if response.status_code != 200 or len(response.content) > 1_000_000:
+                                raise UserError("登录失败：无法取得微信二维码。")
+                            rendered = terminal_qr(response.content)
+                            image_path = self.root / "data" / "login-qr.png"
+                            image_path.write_bytes(response.content)
+                            image_path.chmod(0o600)
+                            qr(rendered)
+                            displayed = source
+                    expired = frame.get_by_text(re.compile(r"二维码已(?:过期|失效)|二维码过期"))
+                    if any([await item.is_visible() for item in await expired.all()]):
+                        refresh = frame.locator(".js_refresh_qrcode:visible, .js_web_qrcode_reload:visible").first
+                        if not await refresh.count():
+                            raise UserError("登录失败：微信二维码已过期，请重新登录。")
+                        await refresh.click(timeout=3000)
+                        displayed = ""
+                registration = page.get_by_role("button", name=re.compile(r"^(同意并注册|注册并登录|同意并登录)$"))
+                if await registration.count() and await registration.first.is_visible():
+                    status("元宝要求确认协议后注册/登录，请阅读协议并选择是否同意。")
+                    confirm()
+                    await asyncio.wait_for(approval.wait(), max(1, deadline - asyncio.get_running_loop().time()))
+                    approval.clear()
+                    await registration.first.click(timeout=5000)
+                binding = page.get_by_text(re.compile(r"^跳过[，,、\s]*直接登录$"))
+                if await binding.count() and await binding.first.is_visible():
+                    await binding.first.click(timeout=3000)
+                await asyncio.sleep(0.25)
+            raise UserError("登录失败：等待扫码超时，请重新登录。")
+        finally:
+            page.remove_listener("response", received)
+            (self.root / "data" / "login-qr.png").unlink(missing_ok=True)
+
+    async def save_state(self) -> None:
+        assert self.context is not None
+        value = await self.context.storage_state(indexed_db=True)
+        descriptor, name = tempfile.mkstemp(prefix=".session-", dir=self.root / "data")
+        temporary = Path(name)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+                json.dump(value, output, ensure_ascii=False)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temporary, self.root / "data" / "session.json")
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    async def download(self, link: str, status: Callable[[str], None]) -> Path:
+        if not re.fullmatch(r"https://weixin\.qq\.com/sph/[A-Za-z0-9_-]+/?", link):
+            raise UserError("请输入 https://weixin.qq.com/sph/... 视频号分享链接。")
+        status("正在解析视频号内容…")
+        response = await self.client.post(PARSE_API, json={"type": "video_channel_url", "url": link, "scene": 1},
+                                          headers={"Cookie": await self.cookie(), "Referer": YUANBAO, "Origin": YUANBAO.rstrip("/")})
+        if response.status_code == 401:
+            raise UserError("登录态已过期，请重新登录后下载。")
+        response.raise_for_status()
+        value = response.json()
+        if value.get("code") != 0:
+            raise UserError("解析失败：元宝未能取得该视频号内容。")
+        playable = urlsplit(value["data"]["playable_url"])
+        if playable.scheme != "https" or playable.hostname != "channels.weixin.qq.com":
+            raise UserError("解析失败：视频号返回地址发生变化。")
+        query = parse_qs(playable.query)
+        response = await self.client.post(FEED_API, json={"baseReq": {"generalToken": query["token"][0]},
+                                                        "exportId": query["eid"][0]},
+                                          headers={"Referer": "https://channels.weixin.qq.com/finder-preview/pages/feed",
+                                                   "Origin": "https://channels.weixin.qq.com"})
+        response.raise_for_status()
+        payload = response.json()
+        error = payload.get("data", {}).get("errMsg") or {}
+        if (payload.get("errCode", 0) != 0 or not isinstance(error, dict)
+                or error.get("type", 0) != 0 or error.get("title") or error.get("content")):
+            raise UserError("解析失败：视频号内容不可用。")
+        feed: dict[str, Any] = payload["data"]["feedInfo"]
+        video = next((item.get("videoUrl") for item in (
+            feed.get("h264VideoInfo") or {}, feed.get("h265VideoInfo") or {}, feed
+        ) if isinstance(item, dict) and item.get("videoUrl")), None)
+        images = feed.get("picInfo") or []
+        if not video and not images and feed.get("coverUrl"):
+            images = [{"url": feed["coverUrl"]}]
+        if not video and not images:
+            raise UserError("解析失败：没有可下载的视频或图片。")
+        parent = self.root / "downloads"
+        temporary = Path(tempfile.mkdtemp(prefix=".partial-", dir=parent))
+        try:
+            if video:
+                status("正在下载视频…")
+                await self.save_media(video, temporary / "video", video=True)
+            else:
+                for index, image in enumerate(images, 1):
+                    status(f"正在下载图片 {index}/{len(images)}…")
+                    await self.save_media(image["url"], temporary / f"{index:03d}", video=False)
+            description = feed.get("description") or feed.get("desc") or feed.get("title") or ""
+            if not isinstance(description, str):
+                raise UserError("解析失败：图文正文格式发生变化。")
+            (temporary / "正文.txt").write_text(description, encoding="utf-8")
+            destination = parent / ("内容-" + temporary.name.removeprefix(".partial-"))
+            os.rename(temporary, destination)
+            return destination
+        finally:
+            if temporary.exists():
+                shutil.rmtree(temporary)
+
+    async def save_media(self, url: str, destination: Path, *, video: bool) -> None:
+        for _ in range(6):
+            parts = urlsplit(url)
+            host = parts.hostname or ""
+            if (parts.scheme != "https" or parts.username or parts.password or parts.port not in (None, 443)
+                    or not any(host == suffix or host.endswith("." + suffix)
+                               for suffix in ("qq.com", "weixin.qq.com", "qpic.cn", "qlogo.cn", "gtimg.com"))):
+                raise UserError("下载失败：媒体地址不是受支持的腾讯 HTTPS 地址。")
+            if video and "X-snsvideoflag" in parse_qs(parts.query):
+                query = urlencode([(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True)
+                                   if key != "X-snsvideoflag"])
+                url = urlunsplit(parts._replace(query=query))
+            async with self.media_client.stream("GET", url, headers={"Accept-Encoding": "identity"}) as media:
+                if media.is_redirect:
+                    url = urljoin(url, media.headers["location"])
+                    continue
+                media.raise_for_status()
+                mime = media.headers.get("content-type", "").split(";", 1)[0].lower()
+                extensions = ({"video/mp4": ".mp4", "video/webm": ".webm", "application/octet-stream": ".mp4"}
+                              if video else {"image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png", "image/webp": ".webp",
+                                             "image/gif": ".gif", "image/avif": ".avif"})
+                if mime not in extensions:
+                    raise UserError("下载失败：媒体服务返回的不是有效视频或图片。")
+                size = 0
+                with destination.with_suffix(extensions[mime]).open("xb") as output:
+                    async for chunk in media.aiter_bytes():
+                        size += output.write(chunk)
+                expected = media.headers.get("content-length")
+                if not size or (expected and not media.headers.get("content-encoding") and size != int(expected)):
+                    raise UserError("下载失败：媒体文件不完整。")
+                return
+        raise UserError("下载失败：媒体重定向次数过多。")

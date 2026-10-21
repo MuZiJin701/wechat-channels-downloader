@@ -1,6 +1,6 @@
 # Spec：微信视频号下载便携式 TUI
 
-本文根据已有讨论整理，描述待实现的目标行为。测试边界已由用户确认；当前项目尚无应用代码或平台验收结果。
+本文根据已有讨论整理，描述目标行为。测试边界已由用户确认，已发布为 [Spec #1](https://github.com/MuZiJin701/wechat-channels-downloader/issues/1)。规格形成时尚无应用代码或平台验收结果；当前实现与验证情况见 [README](../README.md)。
 
 ## Problem Statement
 

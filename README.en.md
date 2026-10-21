@@ -45,9 +45,11 @@ Tests exercise the TUI workflow with real headless Chromium, temporary directori
 
 The build script creates a platform-specific portable directory and archive under `dist/`, including Chromium, dependencies, and third-party notices. It executes the packaged offline smoke check from a different working directory before creating the archive. Windows cannot cross-build the macOS or Linux package.
 
+On macOS, the build copies Chromium's complete application directory and symbolic links into the package, preserving the browser's existing signature instead of letting PyInstaller rewrite its frameworks.
+
 The build refuses to overwrite an existing output directory containing `data/` or `downloads/`; move the existing program and its data together first. It also checks the completed archive for these private directories, cancelling archive creation while preserving local data if either is found.
 
-The GitHub Actions workflow targets Ubuntu 24.04 x64, macOS 14 arm64, and macOS 15 Intel. It runs type checking, tests, packaging, and bundled Chromium/TUI startup before uploading archives. Remote results require pushing the code and running the workflow. Intel macOS 15 success does not establish macOS 14 compatibility.
+The GitHub Actions workflow targets Ubuntu 24.04 x64, macOS 14 arm64, and macOS 15 Intel. It runs type checking, tests, packaging, and bundled Chromium/TUI startup before uploading archives. [Successful run and platform artifacts](https://github.com/MuZiJin701/wechat-channels-downloader/actions/runs/39591619812). Intel macOS 15 success does not establish macOS 14 compatibility.
 
 See the [validation record](docs/validation.md) for executed checks and remaining acceptance work. Real QR login, online downloads, and file-manager double-click behavior need separate acceptance.
 

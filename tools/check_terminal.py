@@ -41,7 +41,8 @@ def check_terminal(command: list[str]) -> None:
                 assert process.returncode == 0, f"Terminal smoke exited with code {process.returncode}"
         assert b"\x1b[?1049h" in output, "Check did not enter the real terminal screen"
         assert b"SMOKE_OK" in output, "Offline browser/TUI check did not complete"
-        assert termios.tcgetattr(slave) == before, "TUI exit changed terminal attributes (echo/canonical/input flags)"
+        after = termios.tcgetattr(slave)
+        assert after == before, f"TUI exit changed terminal attributes: before={before!r}, after={after!r}"
     finally:
         os.close(master)
         os.close(slave)

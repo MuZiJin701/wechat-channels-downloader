@@ -14,12 +14,15 @@
 | 新旧归档 | 通过 | 新归档生成 `parse.json`，HTML 通用数据名称和本地引用，响应原值保留；旧 `yuanbao.json` 不改动 |
 | 界面预览 | 已检查（限定范围） | 离线模拟会话生成就绪、扫码、结果和小窗口画面，检查独立配色、留白、控件层次与二维码黑白；不等同于真实 Windows Terminal 字体或手机扫码验收 |
 | Windows 启动边界 | 通过（模拟） | 优先 pwsh、旧 PowerShell 和 cmd 回退、独立新窗口参数、附着已有控制台、缺少或无法启动 Terminal 后回退，以及错误信息脱敏；外部终端和系统启动服务被模拟 |
+| 修正后 Linux/macOS CI | 通过 | Ubuntu 24.04 x64、macOS 14 arm64、macOS 15 Intel 各运行 37 项，33 项通过、4 项 Windows 专属检查跳过；mypy、源码及实际产物的真实 PTY 退出恢复、打包 Chromium/TUI 离线检查均通过，压缩包已上传，Linux 桌面入口格式检查通过 |
 
 Windows 最终便携包构建通过：两个 EXE 的 PE 子系统分别为 GUI / Console，共用依赖和 Chromium；不同工作目录及含中文、空格、百分号、感叹号、单引号与 `&` 的路径均实际执行离线 smoke 成功。另在这类目录中实际执行启动器生成的 PowerShell 7、Windows PowerShell、cmd 三种命令，均返回 SMOKE_OK；此检查模拟 wt 移交，不是实际 Terminal 窗口验收。压缩包检查通过，不含 data/downloads，顶层仅双 README，内部许可存在。
 
-Standards / Spec 双轴独立审查已完成：固定基线 `7939299` 至实现 `126dfaa`，两个审查轴均无可行动发现。审查只读源码、规格及关联测试，未重复运行自动检查。新版本 Linux/macOS CI 结果尚待远程运行，不以此前版本的通过记录代替。
+Standards / Spec 双轴独立审查已完成：固定基线 `7939299` 至实现 `126dfaa`，以及后续测试修正增量 `3eee249...1c39b83`，两个审查轴均无可行动发现。审查只读源码、规格及关联测试，未重复运行自动检查。
 
-首轮[跨平台 CI 39723330632](https://github.com/MuZiJin701/wechat-channels-downloader/actions/runs/39723330632) 的 macOS 14 arm64 暴露了既有离线页检查的时序问题：页面使用懒加载图片，测试却在滚动及解码前立即要求所有图片完成。修正检查按用户浏览顺序滚动到每张图并等待 `decode()`，仍验证全部图片真实加载及原尺寸，不改变应用的懒加载行为、不增加固定等待。修正后的远程结果继续追加。
+首轮[跨平台 CI 39723330632](https://github.com/MuZiJin701/wechat-channels-downloader/actions/runs/39723330632) 的 macOS 14 arm64 暴露了既有离线页检查的时序问题：页面使用懒加载图片，测试却在滚动及解码前立即要求所有图片完成。修正检查按用户浏览顺序滚动到每张图并等待 `decode()`，仍验证全部图片真实加载及原尺寸，不改变应用的懒加载行为、不增加固定等待。
+
+最终远程验证：[Actions 39723699275](https://github.com/MuZiJin701/wechat-channels-downloader/actions/runs/39723699275)，提交 `1c39b83`，三个平台全部通过；应用实现与 `126dfaa` 一致，增量只涉及测试及验证文档。各平台压缩包位于该运行的 Artifacts，Windows 压缩包在本地 `dist/`。本条结果记录为后续仅文档提交，使用 `[skip ci]`，不重复运行相同应用和测试代码。
 
 额外路径调查发现：包含分号的目录中直接运行控制台产物即发生 `_ctypes` DLL 加载失败，不依赖 shell 移交。尝试额外 DLL 目录和提前导入均无效，未保留这些补丁；双 README 明确要求 Windows 解压路径不含分号。本轮不把模拟编码命令的分号转义检查当作这类目录下的真实启动通过。
 

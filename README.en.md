@@ -2,31 +2,44 @@
 
 [简体中文](README.md)
 
-A portable TUI for Windows, Linux, and macOS. It checks the Yuanbao session, displays a WeChat login QR code when necessary, and archives the single Channels post addressed by a `https://weixin.qq.com/sph/...` share link. It saves all returned video versions, post images, covers, author avatars, certification icons, and background music, together with an offline HTML page and both complete JSON responses. No transcoding, OCR, or generated notes are performed.
+A portable WeChat Channels downloader for Windows, Linux, and macOS. Scan with WeChat when needed, then paste a single `https://weixin.qq.com/sph/...` share link to archive its post. It saves all returned video versions, post images, covers, author avatars, certification icons, and background music, together with an offline HTML page and both complete JSON responses. No transcoding, OCR, or generated notes are performed.
 
 ## Portable packages
 
 Extract the entire package and keep its contents together. No Python installation or additional browser is required. Bundled Chromium makes the package relatively large.
 
-- Windows: double-click `wechat-channels-downloader.exe`. When started in its own console, it prefers Windows Terminal, falling back to the system console if unavailable or launching fails. It does not install a terminal or change system defaults.
+On Windows, avoid semicolons (`;`) in the extraction path: the current packaged runtime cannot load required DLLs there. Chinese characters, spaces, and other common path characters have separate offline artifact checks.
+
+- Windows: double-click `wechat-channels-downloader.exe`. The windowless launcher requests a separate Windows Terminal window directly, preferring PowerShell 7 (`pwsh`), then Windows PowerShell, then cmd, without creating a traditional console first. If Windows Terminal is unavailable or cannot launch, it falls back to the system console. It does not install software or change system defaults.
 - macOS: double-click `wechat-channels-downloader.command`. Intel and Apple Silicon packages are built separately. Apple signing and notarization have not been performed.
 - Ubuntu desktop: use `wechat-channels-downloader.desktop`. The desktop environment may require allowing the launcher to run; Chromium's system libraries must be available. Actual desktop double-click behavior still needs manual acceptance.
 
-Alternatively, run `./wechat-channels-downloader.exe` on Windows or `./wechat-channels-downloader` on Linux/macOS in a terminal. Existing terminals are reused without opening another Windows Terminal window. Both entry methods use the same TUI. The interface uses the terminal's native foreground, background, and ANSI palette; the QR area remains black and white.
+In an existing terminal, run `./wechat-channels-downloader-cli.exe` on Windows or `./wechat-channels-downloader` on Linux/macOS to reuse that terminal. Both entry methods share the TUI, Chromium, and portable data. Keep both Windows EXEs beside `_internal/`; the CLI entry lets the invoking shell wait correctly for exit.
+
+The interface uses a deep ink background, vivid green primary color, and cyan accents, keeping the terminal's font size and a black-and-white QR area. Branding is above the current task, with repository information and a GitHub button below. Visit the repository to leave a Star if you find it useful. An existing `NO_COLOR` setting is respected.
 
 On a Linux server, use an SSH session with a terminal allocated, enter the extracted directory, and run `./wechat-channels-downloader`. To launch directly from another machine, use `ssh -t host 'cd extracted-directory && ./wechat-channels-downloader'`. The program uses the current terminal; it does not bundle a terminal emulator.
 
-On startup, valid sessions are reused. Otherwise, scan the QR code with WeChat and confirm on your phone. Enlarge the terminal as prompted if the complete QR code is not visible. If Yuanbao explicitly requires agreement before registration/login, the TUI presents a confirmation button. Additional security verification stops the flow with a message.
+Startup displays an environment check. Valid sessions go straight to the link input; missing or explicitly expired sessions show a centered WeChat QR code, followed by the input after login. Network errors offer retry without clearing the previous session. Enlarge the terminal as prompted if the QR code is incomplete. If the service requires account agreement before registration/login, the TUI identifies the actual service and waits for explicit confirmation. Additional security verification stops the flow with a message.
 
 The program waits for the WeChat login dialog, using it when it opens automatically and trying the login entry otherwise. It avoids waiting indefinitely to click a homepage button covered by that dialog.
 
-Paste one share link, then press Enter or select “下载”. The TUI shows the current stage, outcome, and output location. Correct an invalid link after failure, or use “重新检查 / 扫码登录” for login problems. Ctrl+Q exits.
+Paste one share link, then press Enter or click “下载”. The interface keeps only the latest result, stage, and save location, with expandable failure details. Complete success clears and focuses the input; failures and partial results retain the link. Duplicate submissions are disabled during downloads. Buttons display shortcuts without using function keys:
+
+| Action | Shortcut |
+| --- | --- |
+| Download | Enter in the input |
+| Retry the failed operation | Ctrl+R |
+| Open downloads | Ctrl+O |
+| Visit the GitHub repository | Ctrl+G |
+| Quit | Ctrl+Q |
+| Move focus / activate a button | Tab, Shift+Tab / Enter, Space |
 
 Every run creates a new `author_excerpt` directory under `downloads/`. Chinese names are retained; absent authors are omitted and missing text falls back to the share identifier. Invalid characters are cleaned and long names shortened while preserving the full original text. Media names reuse the prefix and identify purpose, order, or codec. Collisions add a numeric suffix without overwriting previous downloads. Each directory contains:
 
 - Returned media: every distinct video version, ordered images, and attachments. Identical URLs are downloaded once. Extensions follow the actual media type.
 - `index.html`: double-click to read the original text, author, UTC time, interaction display values as queried, other available information, and local media. Remote media URLs are not needed. If a browser cannot play a codec, use the file link with a local player.
-- `yuanbao.json` and `feed.json`: complete responses from Yuanbao and WeChat Channels respectively, created only when the corresponding response was obtained. Unknown fields are retained; no TXT is generated.
+- `parse.json` and `feed.json`: complete parsing and post responses, linked as “解析原始数据” and “动态原始数据” on the offline page, created only when the corresponding response was obtained. Unknown fields remain unchanged; no TXT is generated. Existing archives and their older filenames are left intact.
 
 The TUI reports “完成” when complete. Individual failures do not stop other transfers; saved files are retained, the result is “部分完成”, and HTML lists missing items. If all media fail, obtained information remains with a “失败” result. Normal quitting during transfer retains complete files and available information, marks HTML “已中断”, and removes incomplete files. Retrying creates a new directory. Unwritable storage is reported explicitly; forced termination or power loss cannot guarantee the final record is written.
 
@@ -38,7 +51,7 @@ Session data is stored beside the program in `data/session.json`; downloads are 
 
 Session files and temporary `data/login-qr.png` are sensitive local data. The QR image is removed when login ends. Do not publish or share the data directory. Delete `data/session.json` to require a fresh scan on the next startup.
 
-Archive JSON may contain expiring media addresses and access parameters. Keep it local and out of public logs, repositories, and distribution packages. Yuanbao login credentials are not sent with media requests to other domains.
+Archive JSON may contain expiring media addresses and access parameters. Keep it local and out of public logs, repositories, and distribution packages. Login credentials are not sent with media requests to other domains.
 
 ## Run from source
 

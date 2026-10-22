@@ -35,6 +35,10 @@ class UserError(Exception):
     """A message safe to display without upstream URLs or credentials."""
 
 
+class LoginRequired(UserError):
+    """The service explicitly rejected the current session."""
+
+
 def terminal_qr(data: bytes) -> Text:
     # Module detection and half-block rendering adapted from wx-video-account-notes (MIT).
     with Image.open(io.BytesIO(data)) as image:
@@ -121,9 +125,9 @@ class Session:
         try:
             identity = response.json()
         except ValueError:
-            raise UserError("登录检查失败：元宝返回内容无法确认身份，已保存的登录态未修改。") from None
+            raise UserError("登录检查失败：服务返回内容无法确认身份，已保存的登录态未修改。") from None
         if not isinstance(identity, dict) or not identity or identity.get("code", 0) not in (0, 200):
-            raise UserError("登录检查失败：元宝身份响应发生变化，已保存的登录态未修改。")
+            raise UserError("登录检查失败：身份响应发生变化，已保存的登录态未修改。")
         anonymous = identity.get("anonUser")
         if isinstance(anonymous, dict) and anonymous.get("isAnon") is True:
             return False
@@ -136,11 +140,11 @@ class Session:
                     confirm: Callable[[], None], approval: asyncio.Event) -> None:
         assert self.context is not None
         page = self.context.pages[0]
-        status("正在等待元宝微信登录界面…")
+        status("正在准备微信扫码登录…")
         login_deadline = asyncio.get_running_loop().time() + 15
         while not await page.get_by_text("微信登录", exact=True).is_visible():
             if asyncio.get_running_loop().time() >= login_deadline:
-                raise UserError("登录失败：未等到元宝微信登录界面，请检查网络或稍后重试。")
+                raise UserError("登录失败：未等到微信登录界面，请检查网络或稍后重试。")
             try:
                 if await page.get_by_text("微信", exact=True).is_visible():
                     await page.get_by_text("微信", exact=True).click(timeout=500)
@@ -150,7 +154,7 @@ class Session:
                 # An automatically opened login dialog can cover the homepage button during the click.
                 pass
             await asyncio.sleep(0.1)
-        status("请用微信扫码，并在手机上确认元宝登录。等待最多 3 分钟。")
+        status("请用微信扫码，并在手机上确认登录。等待最多 3 分钟。")
         deadline = asyncio.get_running_loop().time() + 180
         displayed = ""
         next_check = 0.0
@@ -160,10 +164,10 @@ class Session:
             nonlocal failure
             target = urlsplit(response.url)
             if target.hostname == "yuanbao.tencent.com" and target.path == "/api/joint/login" and response.status >= 400:
-                message = "登录失败：元宝拒绝本次登录，请重新登录。"
+                message = "登录失败：本次登录被拒绝，请重新登录。"
                 try:
                     if (await response.json()).get("safeVerifyTypes"):
-                        message = "登录失败：元宝要求额外安全验证，当前无法继续，请稍后重试。"
+                        message = "登录失败：需要额外安全验证，当前无法继续，请稍后重试。"
                 except Exception:
                     pass
                 failure = message
@@ -182,7 +186,7 @@ class Session:
                 for frame in page.frames:
                     host = urlsplit(frame.url).hostname or ""
                     if host.endswith(("captcha.qq.com", "captcha.qcloud.com")):
-                        raise UserError("登录失败：元宝要求额外安全验证，当前无法继续，请稍后重试。")
+                        raise UserError("登录失败：需要额外安全验证，当前无法继续，请稍后重试。")
                     if host != "open.weixin.qq.com":
                         continue
                     if await frame.locator(".js_wx_after_cancel:visible").count():
@@ -257,12 +261,12 @@ class Session:
                 PARSE_API, json={"type": "video_channel_url", "url": link, "scene": 1},
                 headers={"Cookie": await self.cookie(), "Referer": YUANBAO, "Origin": YUANBAO.rstrip("/")})
             if response.status_code == 401:
-                raise UserError("登录态已过期，请重新登录后下载。")
+                raise LoginRequired("登录态已过期，请重新登录后下载。")
             response.raise_for_status()
             value = response.json()
-            responses["yuanbao"] = value
+            responses["parse"] = value
             if not isinstance(value, dict) or value.get("code") != 0 or not isinstance(value.get("data"), dict):
-                raise UserError("解析失败：元宝未能取得该视频号内容。")
+                raise UserError("解析失败：未能取得该视频号内容。")
             first = value["data"]
             if not isinstance(first.get("playable_url"), str):
                 raise UserError("解析失败：视频号返回地址发生变化。")
@@ -345,7 +349,7 @@ class Session:
                                            ("认证图标", author_info.get("authIconUrl"), first.get("author_certification_icon"))):
             add(label, "image", primary)
             if secondary != primary:
-                add(label + " 元宝", "image", secondary)
+                add("补充" + label, "image", secondary)
         bgm = feed.get("bgmInfo")
         if isinstance(bgm, dict):
             add("背景音乐", "audio", bgm.get("bgmUrl"))

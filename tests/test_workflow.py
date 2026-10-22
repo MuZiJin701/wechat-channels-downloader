@@ -1,6 +1,7 @@
 import json
 import io
 import asyncio
+import sys
 import tempfile
 import unittest
 from contextlib import asynccontextmanager
@@ -33,6 +34,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.media_requests = []
         self.media_status = {}
         self.feed_status = 200
+        self.parse_status = 200
         self.media = {"/video.mp4": (b"complete-video", "video/mp4")}
         self.info_status = 200
         self.info_html = False
@@ -127,7 +129,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, content=data.getvalue(), headers={"content-type": "image/png"})
         if request.url.path == "/api/weixin/get_parse_result":
             self.assertEqual(request.headers.get("cookie"), "session=scan-secret" if self.login_mode else "session=test-secret")
-            return httpx.Response(200, json={"code": 0, "data": self.parse_data})
+            return httpx.Response(self.parse_status, json={"code": 0, "data": self.parse_data})
         if request.url.path == "/finder-preview/api/feed/get_feed_info":
             self.assertNotIn("cookie", request.headers)
             if self.feed_status != 200:
@@ -175,12 +177,15 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_valid_session_downloads_a_complete_video_through_tui(self):
         self.parse_data.update({"author": "发布者", "yuanbao_only": "第一步独有信息"})
+        old = self.root / "downloads" / "old" / "yuanbao.json"
+        old.parent.mkdir(parents=True)
+        old.write_bytes(b"preserve-old-archive")
         async with self.running() as (app, pilot):
             await self.submit(app, pilot)
             archive = self.root / "downloads" / "发布者_测试视频"
             self.assertTrue(archive.is_dir(), self.status(app))
             self.assertEqual(next(archive.glob("发布者_测试视频*.mp4")).read_bytes(), b"complete-video")
-            self.assertEqual(json.loads((archive / "yuanbao.json").read_text(encoding="utf-8"))["data"], self.parse_data)
+            self.assertEqual(json.loads((archive / "parse.json").read_text(encoding="utf-8"))["data"], self.parse_data)
             self.assertEqual(json.loads((archive / "feed.json").read_text(encoding="utf-8"))["data"]["feedInfo"], self.feed)
             self.assertFalse(list(archive.glob("*.txt")))
             page = await app.session.context.new_page()
@@ -191,14 +196,27 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await page.locator("#result").inner_text(), "完成")
             self.assertFalse((await page.locator("video").get_attribute("src")).startswith("https:"))
             self.assertIn("完成", self.status(app))
+            self.assertEqual(await page.get_by_role("link", name="解析原始数据", exact=True).get_attribute("href"), "parse.json")
+            self.assertEqual(app.query_one(Input).value, "")
+            self.assertEqual(old.read_bytes(), b"preserve-old-archive")
 
-    async def test_tui_uses_terminal_foreground_and_background_with_black_white_qr(self):
+    async def test_tui_has_its_own_theme_and_keyboard_actions_without_function_keys(self):
         async with self.running() as (app, pilot):
             await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
-            self.assertEqual(app.screen.styles.background, Color.parse("ansi_default"))
-            self.assertEqual(app.screen.styles.color, Color.parse("ansi_default"))
+            self.assertEqual(app.screen.styles.background, Color.parse("#080f13"))
             self.assertEqual(app.query_one("#qr").styles.background, Color.parse("white"))
             self.assertEqual(app.query_one("#qr").styles.color, Color.parse("black"))
+            self.assertTrue(app.query_one(Input).display)
+            with patch("webbrowser.open") as opened:
+                await pilot.press("ctrl+g")
+                opened.assert_called_once_with("https://github.com/MuZiJin701/wechat-channels-downloader", new=2)
+            self.assertNotIn("元宝", self.status(app))
+            with patch("os.startfile", create=True) as windows_open, patch("subprocess.Popen") as unix_open:
+                await pilot.press("ctrl+o")
+                if sys.platform == "win32":
+                    windows_open.assert_called_once_with(self.root / "downloads")
+                else:
+                    self.assertEqual(unix_open.call_args.args[0][-1], str(self.root / "downloads"))
 
     async def test_image_post_saves_all_images_in_order_and_text(self):
         self.feed = {"description": "图文正文", "picInfo": [
@@ -264,6 +282,9 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         async with self.running() as (app, pilot):
             await self.submit(app, pilot)
             self.assertIn("部分完成", self.status(app))
+            self.assertEqual(app.query_one(Input).value, "https://weixin.qq.com/sph/fixture")
+            self.assertTrue(app.query_one("#details").display)
+            self.assertTrue(app.query_one("#details").collapsed)
             archive = self.root / "downloads" / "测试视频"
             self.assertEqual(next(archive.glob("*.mp4")).read_bytes(), b"complete-video")
             self.assertEqual(next(archive.glob("*.m4a")).read_bytes(), b"music-after-failure")
@@ -276,6 +297,12 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("封面", await page.locator("body").inner_text())
             self.assertIn("失败", await page.locator("body").inner_text())
             self.assertNotIn("https://media", await page.content())
+            self.media_status.clear()
+            self.media["/broken.jpg"] = (b"recovered-cover", "image/jpeg")
+            await pilot.press("ctrl+r")
+            await self.wait_for(pilot, lambda: self.status(app).startswith("下载完成"))
+            self.assertEqual(app.query_one(Input).value, "")
+            self.assertEqual(len(list((self.root / "downloads").iterdir())), 2)
 
     async def test_second_parse_failure_preserves_the_first_response_and_explanation(self):
         self.parse_data.update({"author": "发布者", "desc": "仅元宝说明", "extra": {"keep": True}})
@@ -285,7 +312,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("失败", self.status(app))
             archive = self.root / "downloads" / "发布者_仅元宝说明"
             self.assertTrue((archive / "index.html").exists())
-            self.assertEqual(json.loads((archive / "yuanbao.json").read_text(encoding="utf-8"))["data"], self.parse_data)
+            self.assertEqual(json.loads((archive / "parse.json").read_text(encoding="utf-8"))["data"], self.parse_data)
             self.assertFalse((archive / "feed.json").exists())
             self.assertNotIn("test-secret", (archive / "index.html").read_text(encoding="utf-8"))
 
@@ -320,6 +347,9 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         async with self.running() as (app, pilot):
             await self.wait_for(pilot, lambda: "扫码" in self.status(app))
             await self.wait_for(pilot, lambda: "█" in str(app.query_one("#qr", Static).render()))
+            self.assertFalse(app.query_one("#entry").display)
+            self.assertFalse(app.query_one("#terms").display)
+            self.assertNotIn("元宝", self.status(app))
             self.assertFalse(self.state.exists())
             self.scanned = True
             await self.submit(app, pilot)
@@ -363,9 +393,25 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.state.read_bytes(), original)
             self.assertNotIn("█", str(app.query_one("#qr", Static).render()))
             self.info_status = 200
-            await pilot.click("#retry")
+            await pilot.press("ctrl+r")
             await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
             self.assertIn("有效", self.status(app))
+
+    async def test_expired_session_during_download_can_scan_again_without_losing_link(self):
+        async with self.running() as (app, pilot):
+            await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
+            self.parse_status = 401
+            app.query_one(Input).value = "https://weixin.qq.com/sph/fixture"
+            await pilot.press("enter")
+            await self.wait_for(pilot, lambda: "过期" in self.status(app))
+            self.assertFalse(app.query_one("#entry").display)
+            self.login_mode = True
+            self.parse_status = 200
+            await pilot.press("ctrl+r")
+            await self.wait_for(pilot, lambda: "█" in str(app.query_one("#qr").render()))
+            self.scanned = True
+            await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
+            self.assertEqual(app.query_one(Input).value, "https://weixin.qq.com/sph/fixture")
 
     async def test_image_post_without_text_downloads_normally(self):
         self.feed = {"picInfo": [{"url": "https://media.weixin.qq.com/one.jpg"}]}

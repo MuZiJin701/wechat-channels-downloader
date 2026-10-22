@@ -78,7 +78,8 @@ class Archive:
         if isinstance(jump, dict) and isinstance(jump.get("wording"), str):
             details.append(jump["wording"])
         information = "".join(f"<p>{escape(value)}</p>" for value in details)
-        links = " · ".join(f'<a href="{name}.json">{name}.json</a>' for name in self.responses)
+        links = " · ".join(f'<a href="{name}.json">{label}</a>' for name, label in
+                           (("parse", "解析原始数据"), ("feed", "动态原始数据")) if name in self.responses)
         self.write_text("index.html", f'''<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">

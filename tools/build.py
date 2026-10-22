@@ -6,6 +6,7 @@ import os
 import platform
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -31,14 +32,18 @@ def main() -> None:
     assert executable.is_file(), "Managed Chromium is missing"
     browser_arguments = [] if sys.platform == "darwin" else [
         "--add-data", f"{browser}{os.pathsep}browsers/{browser.name}"]
-    subprocess.run([
+    command = [
         sys.executable, "-m", "PyInstaller", "--noconfirm", "--onedir", "--name", NAME,
         "--distpath", str(ROOT / "dist"), "--workpath", str(ROOT / "build" / "pyinstaller"),
         "--specpath", str(ROOT / "build"), "--collect-all", "textual", "--collect-all", "playwright",
         "--recursive-copy-metadata", "textual", "--recursive-copy-metadata", "playwright",
         "--recursive-copy-metadata", "httpx", "--recursive-copy-metadata", "pillow",
         *browser_arguments, str(ROOT / "main.py"),
-    ], cwd=ROOT, check=True)
+    ]
+    if sys.platform == "win32":
+        command = [sys.executable, "-m", "PyInstaller", "--noconfirm", "--distpath", str(ROOT / "dist"),
+                   "--workpath", str(ROOT / "build" / "pyinstaller"), str(ROOT / "tools" / "windows.spec")]
+    subprocess.run(command, cwd=ROOT, check=True)
     if sys.platform == "darwin":
         # Preserve Chromium's signed app bundle and framework symlinks without PyInstaller rewriting its binaries.
         shutil.copytree(browser, package / "_internal" / "browsers" / browser.name, symlinks=True)
@@ -71,9 +76,20 @@ def main() -> None:
             "[Desktop Entry]\nType=Application\nName=微信视频号下载\nTerminal=true\n"
             + f"Exec=sh -c {argument} sh %k\n", encoding="utf-8")
         launcher.chmod(0o755)
-    binary = package / (NAME + (".exe" if system == "windows" else ""))
+    binary = package / (NAME + ("-cli.exe" if system == "windows" else ""))
+    if system == "windows":
+        for suffix, subsystem in ((".exe", 2), ("-cli.exe", 3)):
+            image = (package / (NAME + suffix)).read_bytes()
+            header = struct.unpack_from("<I", image, 0x3c)[0]
+            assert struct.unpack_from("<H", image, header + 24 + 68)[0] == subsystem, "Wrong Windows entry subsystem"
     with tempfile.TemporaryDirectory() as working_directory:
         subprocess.run([str(binary), "--smoke-test"], cwd=working_directory, check=True, timeout=120)
+        if system == "windows":
+            with tempfile.TemporaryDirectory(prefix="启动100% !' & ", dir=ROOT / "build") as directory:
+                alias = Path(directory) / NAME
+                shutil.copytree(package, alias, copy_function=os.link)
+                subprocess.run([str(alias / binary.name), "--smoke-test"], cwd=working_directory,
+                               check=True, timeout=120)
         if os.name == "posix":
             subprocess.run([sys.executable, str(ROOT / "tools" / "check_terminal.py"), str(binary)],
                            cwd=working_directory, check=True, timeout=90)

@@ -154,10 +154,10 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         raise AssertionError("Unexpected external request")
 
     @asynccontextmanager
-    async def running(self, size=(110, 50)):
+    async def running(self, size=(110, 50), *, notifications=False):
         app = DownloaderApp(root=self.root, transport=httpx.MockTransport(self.external), browser_setup=self.browser_setup)
         self.active_app = app
-        async with app.run_test(size=size) as pilot:
+        async with app.run_test(size=size, notifications=notifications) as pilot:
             yield app, pilot
 
     def status(self, app):
@@ -202,7 +202,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(old.read_bytes(), b"preserve-old-archive")
 
     async def test_tui_has_its_own_theme_and_keyboard_actions_without_function_keys(self):
-        async with self.running() as (app, pilot):
+        async with self.running(notifications=True) as (app, pilot):
             await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
             self.assertEqual(app.screen.styles.background, Color.parse("#ded0ee"))
             self.assertEqual(app.query_one("#qr").styles.background, Color.parse("white"))
@@ -219,9 +219,10 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 opened.reset_mock()
                 await pilot.press("tab", "shift+tab", "enter")
                 opened.assert_called_once_with("https://github.com/MuZiJin701/wechat-channels-downloader", new=2)
-            with patch("webbrowser.open", return_value=False), patch.object(app, "notify") as notified:
+            with patch("webbrowser.open", return_value=False):
                 await pilot.press("enter")
-                self.assertIn("github.com/MuZiJin701/wechat-channels-downloader", notified.call_args.args[0])
+                await self.wait_for(pilot, lambda: bool(app.query("Toast")))
+                self.assertIn("github.com/MuZiJin701/wechat-channels-downloader", str(app.query_one("Toast", Static).render()))
             self.assertNotIn("元宝", self.status(app))
             with patch("os.startfile", create=True) as windows_open, patch("subprocess.Popen") as unix_open:
                 await pilot.press("ctrl+o")

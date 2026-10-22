@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+import plistlib
 import re
 import shutil
 import struct
@@ -19,6 +20,48 @@ from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[1]
 NAME = "wechat-channels-downloader"
+
+
+def create_launcher(package: Path, system: str) -> None:
+    if system == "darwin":
+        contents = package / f"{NAME}.app" / "Contents"
+        (contents / "MacOS").mkdir(parents=True)
+        (contents / "Resources").mkdir()
+        with (contents / "Info.plist").open("wb") as file:
+            plistlib.dump({"CFBundleName": NAME, "CFBundleDisplayName": "微信视频号下载",
+                          "CFBundleIdentifier": "io.github.MuZiJin701.wechat-channels-downloader",
+                          "CFBundlePackageType": "APPL", "CFBundleExecutable": "launch",
+                          "CFBundleIconFile": "logo.icns", "CFBundleVersion": "1",
+                          "LSMinimumSystemVersion": "14.0", "NSHighResolutionCapable": True,
+                          "NSAppleEventsUsageDescription": "打开终端运行微信视频号下载。"}, file)
+        shutil.copy2(ROOT / "downloader" / "assets" / "logo.icns", contents / "Resources" / "logo.icns")
+        script = contents / "Resources" / "launch.applescript"
+        script.write_text('on run argv\n'
+                          '  set packagePath to item 1 of argv\n'
+                          '  tell application "Terminal"\n'
+                          '    do script ("cd " & quoted form of packagePath & " && exec ./wechat-channels-downloader")\n'
+                          '    activate\n'
+                          '  end tell\n'
+                          'end run\n', encoding="utf-8")
+        launcher = contents / "MacOS" / "launch"
+        launcher.write_text('#!/bin/sh\nset -eu\n'
+                            'contents=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\n'
+                            'package=$(CDPATH= cd -- "$contents/../.." && pwd)\n'
+                            'exec /usr/bin/osascript "$contents/Resources/launch.applescript" "$package"\n', encoding="utf-8")
+        launcher.chmod(0o755)
+        if sys.platform == "darwin":
+            subprocess.run(["/bin/sh", "-n", str(launcher)], check=True)
+            with tempfile.TemporaryDirectory() as directory:
+                subprocess.run(["/usr/bin/osacompile", "-o", str(Path(directory) / "launch.scpt"), str(script)], check=True)
+    elif system == "linux":
+        shell = 'exec "$(dirname "$1")/wechat-channels-downloader"'
+        argument = '"' + re.sub(r'(["`$\\])', r'\\\1', shell).replace("\\", "\\\\") + '"'
+        launcher = package / f"{NAME}.desktop"
+        icon = str(package.resolve() / "_internal" / "downloader" / "assets" / "logo.png")
+        icon = icon.replace("\\", "\\\\").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
+        launcher.write_text("[Desktop Entry]\nType=Application\nName=微信视频号下载\nTerminal=true\n"
+                            + f"Icon={icon}\nExec=sh -c {argument} sh %k\n", encoding="utf-8")
+        launcher.chmod(0o755)
 
 
 def main() -> None:
@@ -38,6 +81,7 @@ def main() -> None:
         "--specpath", str(ROOT / "build"), "--collect-all", "textual", "--collect-all", "playwright",
         "--recursive-copy-metadata", "textual", "--recursive-copy-metadata", "playwright",
         "--recursive-copy-metadata", "httpx", "--recursive-copy-metadata", "pillow",
+        "--add-data", f"{ROOT / 'downloader' / 'assets'}{os.pathsep}downloader/assets",
         *browser_arguments, str(ROOT / "main.py"),
     ]
     if sys.platform == "win32":
@@ -64,18 +108,7 @@ def main() -> None:
     shutil.copy2(ROOT / "THIRD_PARTY_NOTICES.md", package / "_internal" / "THIRD_PARTY_NOTICES.md")
     shutil.copytree(ROOT / "licenses", package / "_internal" / "licenses", dirs_exist_ok=True)
     system = platform.system().lower()
-    if system == "darwin":
-        launcher = package / f"{NAME}.command"
-        launcher.write_text('#!/bin/sh\ncd -- "$(dirname -- "$0")"\nexec ./wechat-channels-downloader\n', encoding="utf-8")
-        launcher.chmod(0o755)
-    elif system == "linux":
-        shell = 'exec "$(dirname "$1")/wechat-channels-downloader"'
-        argument = '"' + re.sub(r'(["`$\\])', r'\\\1', shell).replace("\\", "\\\\") + '"'
-        launcher = package / f"{NAME}.desktop"
-        launcher.write_text(
-            "[Desktop Entry]\nType=Application\nName=微信视频号下载\nTerminal=true\n"
-            + f"Exec=sh -c {argument} sh %k\n", encoding="utf-8")
-        launcher.chmod(0o755)
+    create_launcher(package, system)
     binary = package / (NAME + ("-cli.exe" if system == "windows" else ""))
     if system == "windows":
         for suffix, subsystem in ((".exe", 2), ("-cli.exe", 3)):

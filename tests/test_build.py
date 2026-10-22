@@ -1,12 +1,39 @@
 import shutil
+import plistlib
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+from PIL import Image
+from tools.build import create_launcher
+
 
 class BuildTests(unittest.TestCase):
+    def test_platform_launchers_include_icons_and_keep_the_terminal_entry(self):
+        with tempfile.TemporaryDirectory(prefix="图标 ' % ") as directory:
+            root = Path(directory)
+            for system in ("darwin", "linux"):
+                package = root / system
+                package.mkdir()
+                create_launcher(package, system)
+            contents = root / "darwin" / "wechat-channels-downloader.app" / "Contents"
+            with (contents / "Info.plist").open("rb") as file:
+                info = plistlib.load(file)
+            self.assertEqual(info["CFBundleExecutable"], "launch")
+            self.assertEqual(info["CFBundlePackageType"], "APPL")
+            with Image.open(contents / "Resources" / info["CFBundleIconFile"]) as icon:
+                self.assertEqual(icon.size, (1024, 1024))
+                icon.verify()
+            launcher = (contents / "MacOS" / "launch").read_text(encoding="utf-8")
+            self.assertIn('"$contents/Resources/launch.applescript" "$package"', launcher)
+            self.assertIn("quoted form of packagePath", (contents / "Resources" / "launch.applescript").read_text())
+            desktop = (root / "linux" / "wechat-channels-downloader.desktop").read_text(encoding="utf-8")
+            self.assertIn("Icon=" + str((root / "linux").resolve()).replace("\\", "\\\\"), desktop)
+            self.assertIn("Terminal=true", desktop)
+            self.assertIn(" sh %k", desktop)
+
     def test_rebuild_refuses_to_overwrite_portable_user_data(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

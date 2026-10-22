@@ -11,12 +11,16 @@
 Windows 解压路径请避开分号 `;`：当前打包运行时在这类路径下无法加载必要 DLL。中文、空格及其他常见路径字符另有离线产物检查。
 
 - Windows：双击 `wechat-channels-downloader.exe`。无控制台启动器直接请求独立 Windows Terminal 窗口，优先 PowerShell 7（`pwsh`），缺失时依次使用 Windows PowerShell、cmd；不先创建传统控制台。Windows Terminal 不可用或启动失败时回退系统控制台，不自动安装软件或改变系统默认设置。
-- macOS：双击 `wechat-channels-downloader.command`。包按 Intel / Apple Silicon 分别构建；未进行 Apple 签名或公证。
-- Ubuntu 桌面：使用 `wechat-channels-downloader.desktop`。桌面环境可能要求先允许启动；需要系统具备 Chromium 所需的动态库。该入口的真实桌面双击行为仍需人工验收。
+- macOS：双击带图标的 `wechat-channels-downloader.app`，它会打开 Terminal 运行同一 TUI。保留整个解压目录，不能只移动启动器；首次可能需要允许打开或控制 Terminal。包按 Intel / Apple Silicon 分别构建；未进行 Apple 签名或公证。
+- Ubuntu 桌面：使用 `wechat-channels-downloader.desktop`。桌面环境可能要求先允许启动；需要系统具备 Chromium 所需的动态库。图标采用绝对路径，首次启动或移动目录后的下一次启动会刷新自身入口的图标引用；文件管理器可能需要刷新。该入口的真实桌面双击行为仍需人工验收。
 
 在已有终端运行 Windows 的 `./wechat-channels-downloader-cli.exe`，或 Linux/macOS 的 `./wechat-channels-downloader`，会直接复用当前终端。两种入口共用 TUI、Chromium 和便携数据。Windows 两个 EXE 均需与 `_internal/` 保持在一起；命令行入口能让调用它的 shell 正确等待退出。
 
-界面使用较浓的浅紫背景、深紫主操作、柔和紫灰辅助控件与深色正文，成功、警告和错误另有语义颜色及文字。连续画布通过留白突出当前任务，不使用卡片外框；字体大小保持终端原设置，二维码保持静态黑白，小窗口可重排或滚动。已有 `NO_COLOR` 设置仍会被尊重。
+界面使用鼠尾草绿浅色、森林绿深色两套主题，品牌区展示播放与保存标志和静态渐变，成功、警告和错误另有语义颜色及文字。顶部“外观”选择器支持鼠标及键盘，提供“跟随系统 / 浅色 / 深色”；首次默认跟随系统，选择立即生效并保存，切换不影响扫码、下载、输入及结果。
+
+自动模式约每两秒检查程序运行所在机器的系统明暗；Windows 读取应用主题偏好，macOS 读取系统外观，Ubuntu/GNOME 读取桌面颜色偏好。没有桌面、缺少查询工具或无法识别时使用浅色，可手动切换；SSH 不读取客户端电脑的系统主题。手动选择后保持指定主题，重新选“跟随系统”恢复自动变化。不修改全局终端配置。
+
+窗口放大时内容区随之展开，缩小时减少留白、重排按钮与外观选择器，高度不足时滚动；二维码保持静态黑白，过小窗口会提示放大。字体大小保持终端原设置。真彩色终端可展示渐变，其他终端可能出现色阶；已有 `NO_COLOR` 设置仍会被尊重。
 
 底部的 `GitHub · MuZiJin701/wechat-channels-downloader ↗` 为文本链接，可点击，或用 Tab / Shift+Tab 聚焦后按 Enter 打开；没有独立 GitHub 按钮或专用快捷键。
 
@@ -37,7 +41,9 @@ Linux 服务器通过 SSH 使用时，在已分配终端的会话中进入解压
 | 退出 | Ctrl+Q |
 | 切换操作 / 确认按钮 | Tab、Shift+Tab / Enter、空格 |
 
-输入区使用普通单行文本编辑，占位提示“粘贴视频号分享链接”不含示例网址。点击定位光标、拖动选择，支持 Home / End、方向键与 Shift 选区、退格、删除及复制剪切粘贴；程序不把输入区做成超链接。系统剪贴板粘贴及宿主对实际网址的链接识别受终端支持影响，仍需在目标 Windows Terminal 等终端中实际验收；不修改用户的全局终端配置。
+输入区使用普通单行文本编辑，占位提示“粘贴视频号分享链接”不含示例网址。点击定位光标、拖动选择，支持 Home / End、方向键与 Shift 选区、退格、删除及复制剪切粘贴；程序不把输入区做成超链接。聚焦且输入位置可见时，使用终端原生细竖线闪烁光标，失焦或被遮挡时隐藏，正常退出时恢复终端配置的默认光标形状。具体显示与闪烁仍受终端支持影响。系统剪贴板粘贴及宿主对实际网址的链接识别仍需在目标 Windows Terminal 等终端中实际验收。
+
+Windows 运行期间还会临时匹配光标颜色，避免浅色终端中手动选择深色应用主题后光标难以辨认；正常退出恢复宿主默认光标颜色，不写入终端设置文件。
 
 每次归档在 `downloads/` 新建 `作者_正文摘要` 目录，允许中文；缺作者时省略，缺正文时回退分享标识。非法字符清理，长名称截短，原正文完整保留。媒体沿用此前缀并附用途、顺序或编码；重名时加序号，不覆盖旧下载。目录中包含：
 
@@ -51,7 +57,7 @@ Linux 服务器通过 SSH 使用时，在已分配终端的会话中进入解压
 
 Linux/macOS 退出时会在 Playwright 子进程清理完成后恢复启动前的终端属性。使用旧包或强制终止后若输入命令不显示，可盲输入 `stty sane` 并回车；必要时再执行 `reset`，回车无反应时尝试 Ctrl+J。强制杀进程（如 SIGKILL）无法保证执行清理。
 
-登录态位于程序旁 `data/session.json`，内容位于 `downloads/`。macOS 若放入应用包，数据仍定位到包外侧。移动程序时可连同数据目录一起移动，但登录态仍需重新校验，不能保证跨机器或跨系统继续有效。目录不可写时明确报错，不静默改用其他位置。
+登录态位于程序旁 `data/session.json`，主题模式单独保存在 `data/appearance.json`，内容位于 `downloads/`。macOS 的这些目录均位于 `.app` 启动器外侧。删除 `appearance.json` 可恢复默认跟随系统，不影响登录态；偏好损坏时也恢复自动模式，保存失败会提示且保留本次主题。移动程序时可连同数据目录一起移动，但登录态仍需重新校验，不能保证跨机器或跨系统继续有效。目录不可写时明确报错，不静默改用其他位置。
 
 登录态及临时 `data/login-qr.png` 属于敏感本地数据；扫码结束后删除临时二维码。请勿上传、分享或提交数据目录。清除 `data/session.json` 可在下次启动重新扫码。
 
@@ -91,6 +97,8 @@ uv run --locked python tools/check_terminal.py "$PWD/.venv/bin/python" "$PWD/mai
 构建脚本在当前平台生成 `dist/` 便携目录与压缩包，包含 Chromium、依赖及第三方声明。顶层仅保留双 README 使用文档，第三方声明和许可位于 `_internal/`，开发文档不随包分发；包内 README 的开发文档链接转向公开仓库。脚本会从其他工作目录执行打包产物的离线 smoke 检查，通过后才生成压缩包。不能从 Windows 交叉构建 macOS 或 Linux 包。
 
 macOS 构建将 Chromium 的完整应用目录及符号链接复制到包内，保留浏览器原有签名，避免 PyInstaller 重新处理其框架。
+
+Logo 原图和各平台图标位于 `downloader/assets/`。修改图形后运行 `uv run --locked python tools/draw_logo.py`，使用已有 Pillow 同步生成 PNG、Windows ICO 与 macOS ICNS；主界面按相同图形生成字符块版本，不在具体控件上放 Logo。打包保留图标资源，macOS 构建另检查启动脚本语法并编译 AppleScript；实际 Finder/Terminal 交互需人工验收。
 
 若已有输出目录包含 `data/` 或 `downloads/`，构建会拒绝覆盖；先将旧程序与数据整体移到其他位置。压缩包生成后还会检查不含这两个私有目录，发现时取消归档并保留本地数据。
 

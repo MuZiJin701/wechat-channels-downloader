@@ -41,6 +41,8 @@ def check_terminal(command: list[str]) -> None:
                 assert process.returncode == 0, f"Terminal smoke exited with code {process.returncode}"
         assert b"\x1b[?1049h" in output, "Check did not enter the real terminal screen"
         assert b"SMOKE_OK" in output, "Offline browser/TUI check did not complete"
+        assert b"\x1b[5 q" in output, "Input did not enable the native blinking bar caret"
+        assert b"\x1b[0 q" in output, "Exit did not restore the configured cursor shape"
         after = termios.tcgetattr(slave)
         if sys.platform == "darwin":
             # XNU sets PENDIN when restoring canonical input; it is pending-input state, not a setting.

@@ -40,6 +40,13 @@ async def smoke(*, terminal: bool = False) -> None:
             await pilot.pause()
             assert not app.query_one(Input).disabled, "Packaged browser/TUI failed to reach link input"
             if terminal:
+                await pilot.click("#theme-mode")
+                await pilot.press("home", "down", "down", "enter", "tab", "tab", "w", "x", "home")
+                await pilot.pause()
+                field = app.query_one(Input)
+                assert app.theme == "channels-dark", "Terminal theme selector did not switch"
+                assert field.value == "wx", "Terminal input lost normal text editing"
+                assert app.native_cursor_position() == field.content_region.offset, "Native caret is misplaced"
                 await pilot.press("ctrl+q")
 
         if terminal:

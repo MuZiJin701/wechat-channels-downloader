@@ -11,12 +11,16 @@ Extract the entire package and keep its contents together. No Python installatio
 On Windows, avoid semicolons (`;`) in the extraction path: the current packaged runtime cannot load required DLLs there. Chinese characters, spaces, and other common path characters have separate offline artifact checks.
 
 - Windows: double-click `wechat-channels-downloader.exe`. The windowless launcher requests a separate Windows Terminal window directly, preferring PowerShell 7 (`pwsh`), then Windows PowerShell, then cmd, without creating a traditional console first. If Windows Terminal is unavailable or cannot launch, it falls back to the system console. It does not install software or change system defaults.
-- macOS: double-click `wechat-channels-downloader.command`. Intel and Apple Silicon packages are built separately. Apple signing and notarization have not been performed.
-- Ubuntu desktop: use `wechat-channels-downloader.desktop`. The desktop environment may require allowing the launcher to run; Chromium's system libraries must be available. Actual desktop double-click behavior still needs manual acceptance.
+- macOS: double-click the branded `wechat-channels-downloader.app` launcher to open Terminal with the same TUI. Keep the entire extracted directory together; do not move only the launcher. First launch may require permission to open the app or control Terminal. Intel and Apple Silicon packages are built separately. Apple signing and notarization have not been performed.
+- Ubuntu desktop: use `wechat-channels-downloader.desktop`. The desktop environment may require allowing the launcher to run; Chromium's system libraries must be available. Desktop icons require absolute paths, so first launch and the next launch after moving the directory refresh this launcher's icon reference; refreshing the file manager may also be necessary. Actual desktop double-click behavior still needs manual acceptance.
 
 In an existing terminal, run `./wechat-channels-downloader-cli.exe` on Windows or `./wechat-channels-downloader` on Linux/macOS to reuse that terminal. Both entry methods share the TUI, Chromium, and portable data. Keep both Windows EXEs beside `_internal/`; the CLI entry lets the invoking shell wait correctly for exit.
 
-The interface uses a richer light lavender background, deep purple primary actions, muted purple-gray secondary controls, and dark text. Success, warnings, and errors have distinct semantic colors and text. A continuous canvas and whitespace emphasize the current task without an enclosing card. The terminal's font size is retained, QR codes stay static black and white, and small windows reflow or scroll. An existing `NO_COLOR` setting is respected.
+The interface offers sage-green light and forest-green dark themes, with a play-and-save logo and a static gradient in the brand area. Success, warnings, and errors keep distinct semantic colors and text. The top appearance selector supports mouse and keyboard with three modes: follow system, light, and dark. First launch follows the system; changes apply immediately and are saved without interrupting login or downloads, or clearing input and results.
+
+Automatic mode checks the executing machine's OS appearance roughly every two seconds: the Windows application-theme preference, macOS appearance, or Ubuntu/GNOME desktop color preference. Missing desktop settings or query tools fall back to light, with manual selection available. SSH does not inspect the client computer's theme. Manual light/dark remains fixed until follow-system is selected again. Global terminal settings are not changed.
+
+Content expands with larger windows; smaller windows reduce whitespace and rearrange actions and the appearance selector, with scrolling when needed. QR codes stay static black and white and request a larger window when necessary. The terminal's font size is retained. Truecolor terminals can display gradients; other terminals may show color banding. An existing `NO_COLOR` setting is respected.
 
 The footer text link `GitHub · MuZiJin701/wechat-channels-downloader ↗` opens by clicking or focusing with Tab / Shift+Tab and pressing Enter. There is no dedicated GitHub button or shortcut.
 
@@ -37,7 +41,9 @@ Paste one share link, then press Enter or click “下载”. The interface keep
 | Quit | Ctrl+Q |
 | Move focus / activate a button | Tab, Shift+Tab / Enter, Space |
 
-The single-line text field shows “粘贴视频号分享链接” when empty, without an example URL. Click to position the cursor or drag to select; Home / End, arrows, Shift selection, Backspace, Delete, copy, cut, and paste are supported. The application does not turn the input into a hyperlink. System clipboard paste and host link detection for actual URLs depend on terminal support and still need acceptance in Windows Terminal or the target terminal; global terminal settings are not changed.
+The single-line text field shows “粘贴视频号分享链接” when empty, without an example URL. Click to position the cursor or drag to select; Home / End, arrows, Shift selection, Backspace, Delete, copy, cut, and paste are supported. The application does not turn the input into a hyperlink. A native blinking bar caret appears when the input is focused and its insertion point is visible, hides when unfocused or covered, and resets to the terminal's configured default shape on normal exit. Rendering and blinking remain terminal-dependent. System clipboard paste and host link detection for actual URLs still need acceptance in Windows Terminal or the target terminal.
+
+On Windows, the caret color also temporarily matches the app theme so manually selecting dark inside a light terminal keeps the caret legible. Normal exit resets the host's default cursor color without writing terminal settings.
 
 Every run creates a new `author_excerpt` directory under `downloads/`. Chinese names are retained; absent authors are omitted and missing text falls back to the share identifier. Invalid characters are cleaned and long names shortened while preserving the full original text. Media names reuse the prefix and identify purpose, order, or codec. Collisions add a numeric suffix without overwriting previous downloads. Each directory contains:
 
@@ -51,7 +57,7 @@ Only content returned by the current interfaces is archived. Missing optional re
 
 On Linux/macOS, the original terminal attributes are restored after Playwright subprocess cleanup. If an older package or forced termination leaves typed commands invisible, type `stty sane` blindly and press Enter; use `reset` if needed, or Ctrl+J if Enter does not work. Forced termination such as SIGKILL cannot guarantee cleanup.
 
-Session data is stored beside the program in `data/session.json`; downloads are stored in `downloads/`. If placed in a macOS application bundle, data is located outside the bundle. Moving the program and its data together is possible, but sessions are revalidated and may not survive moving between machines or operating systems. An unwritable location produces an error without silently falling back elsewhere.
+Session data is stored beside the program in `data/session.json`, the theme mode separately in `data/appearance.json`, and downloads in `downloads/`. These directories are outside the macOS `.app` launcher. Deleting `appearance.json` restores follow-system without affecting login; invalid preferences also fall back to automatic mode. Save failures report a warning while keeping the current appearance. Moving the program and its data together is possible, but sessions are revalidated and may not survive moving between machines or operating systems. An unwritable location produces an error without silently falling back elsewhere.
 
 Session files and temporary `data/login-qr.png` are sensitive local data. The QR image is removed when login ends. Do not publish or share the data directory. Delete `data/session.json` to require a fresh scan on the next startup.
 
@@ -91,6 +97,8 @@ This command uses `--terminal-smoke-test` with an offline temporary session and 
 The build script creates a platform-specific portable directory and archive under `dist/`, including Chromium, dependencies, and third-party notices. Only the two README documents remain at the top level; notices and licenses are under `_internal/`, and development documents are excluded. Development-document links in the packaged READMEs point to the public repository. It executes the packaged offline smoke check from a different working directory before creating the archive. Windows cannot cross-build the macOS or Linux package.
 
 On macOS, the build copies Chromium's complete application directory and symbolic links into the package, preserving the browser's existing signature instead of letting PyInstaller rewrite its frameworks.
+
+Logo assets are in `downloader/assets/`. After changing the drawing, run `uv run --locked python tools/draw_logo.py` to regenerate PNG, Windows ICO, and macOS ICNS with the existing Pillow dependency. The TUI renders the same shape with colored character blocks; individual controls do not use the logo. Packaging includes the assets, and macOS builds additionally check the launcher shell syntax and compile its AppleScript. Actual Finder/Terminal interaction requires manual acceptance.
 
 The build refuses to overwrite an existing output directory containing `data/` or `downloads/`; move the existing program and its data together first. It also checks the completed archive for these private directories, cancelling archive creation while preserving local data if either is found.
 

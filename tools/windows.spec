@@ -18,10 +18,12 @@ with sync_playwright() as playwright:
     executable = Path(playwright.chromium.executable_path)
 browser = next(path for path in executable.parents if path.name.startswith("chromium-"))
 datas.append((str(browser), "browsers/" + browser.name))
+datas.append((str(root / "downloader" / "assets"), "downloader/assets"))
 a = Analysis([str(root / "main.py")], pathex=[str(root)], binaries=binaries, datas=datas,
              hiddenimports=hiddenimports)
 pyz = PYZ(a.pure)
-console = EXE(pyz, a.scripts, [], exclude_binaries=True, name=name + "-cli", console=True)
+console = EXE(pyz, a.scripts, [], exclude_binaries=True, name=name + "-cli", console=True,
+              icon=str(root / "downloader" / "assets" / "logo.ico"))
 window = EXE(pyz, a.scripts, [], exclude_binaries=True, name=name, console=False,
-             disable_windowed_traceback=True)
+             disable_windowed_traceback=True, icon=str(root / "downloader" / "assets" / "logo.ico"))
 COLLECT(window, console, a.binaries, a.datas, name=name)

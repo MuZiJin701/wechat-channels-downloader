@@ -2,6 +2,7 @@ import json
 import io
 import asyncio
 import sys
+import subprocess
 import tempfile
 import unittest
 from contextlib import asynccontextmanager
@@ -11,7 +12,7 @@ from unittest.mock import patch
 import httpx
 from PIL import Image, ImageDraw
 from textual import events
-from textual.widgets import Input, Link, Static
+from textual.widgets import Input, Link, Select, Static
 from textual.color import Color
 
 from downloader.app import DownloaderApp
@@ -74,10 +75,11 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 registration = ('<button onclick="fetch(\'/fixture/approve\');this.remove()">同意并注册</button>'
                                 if self.require_registration and not self.registered else '')
                 if self.additional_verification:
-                    registration += '''<script>setInterval(async () => {
+                    registration += '''<script>async function pollVerification() {
                         if ((await (await fetch('/fixture/scanned')).json()).scanned)
-                            fetch('/api/joint/login', {method:'POST'});
-                    }, 100);</script>'''
+                            await fetch('/api/joint/login', {method:'POST'});
+                        setTimeout(pollVerification, 100);
+                    } pollVerification();</script>'''
                 if self.delayed_login_dialog:
                     await request.fulfill(content_type="text/html; charset=utf-8", body='''<button>登录</button>
                         <div id="overlay" style="position:fixed;inset:0;z-index:10;background:white"></div>
@@ -99,10 +101,10 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                     return
                 await request.fulfill(content_type="text/html; charset=utf-8", body=registration + '''<html><button>微信登录</button>
                     <iframe src="https://open.weixin.qq.com/connect/qrconnect"></iframe>
-                    <script>setInterval(async () => {
-                        if ((await (await fetch('/fixture/scanned')).json()).scanned)
-                            document.cookie='session=scan-secret; path=/; secure';
-                    }, 100);</script></html>''')
+                    <script>async function pollScan() {
+                        await fetch('/fixture/scanned');
+                        setTimeout(pollScan, 100);
+                    } pollScan();</script></html>''')
             else:
                 await request.fulfill(status=200, content_type="text/html", body="<html></html>")
         await context.route("**/*", route)
@@ -204,7 +206,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_tui_has_its_own_theme_and_keyboard_actions_without_function_keys(self):
         async with self.running(notifications=True) as (app, pilot):
             await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
-            self.assertEqual(app.screen.styles.background, Color.parse("#ded0ee"))
+            self.assertEqual(app.screen.styles.background, Color.parse(app.current_theme.background))
             self.assertEqual(app.query_one("#qr").styles.background, Color.parse("white"))
             self.assertEqual(app.query_one("#qr").styles.color, Color.parse("black"))
             self.assertTrue(app.query_one(Input).display)
@@ -230,6 +232,151 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                     windows_open.assert_called_once_with(self.root / "downloads")
                 else:
                     self.assertEqual(unix_open.call_args.args[0][-1], str(self.root / "downloads"))
+
+    def operating_system_appearance(self, dark):
+        if sys.platform == "win32":
+            return patch("winreg.QueryValueEx", return_value=(0 if dark else 1, 4),
+                         side_effect=OSError("unavailable") if dark is None else None)
+        return patch("subprocess.run", return_value=subprocess.CompletedProcess(
+            [], 0, ("Dark" if sys.platform == "darwin" else "'prefer-dark'") if dark else "'prefer-light'"),
+                     side_effect=OSError("unavailable") if dark is None else None)
+
+    async def choose_theme(self, pilot, mode):
+        await pilot.click("#theme-mode")
+        await pilot.press("home", *(["down"] * ("system", "light", "dark").index(mode)), "enter")
+        await pilot.pause()
+
+    async def test_theme_selection_is_immediate_saved_and_does_not_change_session_or_input(self):
+        before = self.state.read_bytes()
+        with self.operating_system_appearance(False):
+            async with self.running() as (app, pilot):
+                await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
+                self.assertEqual(app.theme, "channels-light")
+                self.assertEqual(app.query_one("#theme-mode", Select).value, "system")
+                app.query_one(Input).value = "https://weixin.qq.com/sph/fixture"
+                await self.choose_theme(pilot, "dark")
+                self.assertEqual(app.theme, "channels-dark")
+                self.assertEqual(app.screen.styles.background, Color.parse("#283e2c"))
+                self.assertEqual(app.query_one(Input).value, "https://weixin.qq.com/sph/fixture")
+                self.assertFalse(app.query_one(Input).disabled)
+                self.assertEqual(json.loads((self.root / "data" / "appearance.json").read_text())["theme"], "dark")
+                self.assertEqual(self.state.read_bytes(), before)
+                await pilot.click(app.query_one(Input))
+                await pilot.press("enter")
+                await self.wait_for(pilot, lambda: "下载完成" in self.status(app))
+                result = str(app.query_one("#result", Static).render())
+                await self.choose_theme(pilot, "light")
+                self.assertEqual(app.theme, "channels-light")
+                self.assertEqual(str(app.query_one("#result", Static).render()), result)
+            async with self.running() as (app, pilot):
+                await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
+                self.assertEqual(app.query_one("#theme-mode", Select).value, "light")
+                await self.choose_theme(pilot, "system")
+                self.assertEqual(json.loads((self.root / "data" / "appearance.json").read_text())["theme"], "system")
+        with self.operating_system_appearance(True):
+            async with self.running() as (app, pilot):
+                await self.wait_for(pilot, lambda: not app.query_one(Input).disabled and app.theme == "channels-dark")
+                self.assertEqual(app.query_one("#theme-mode", Select).value, "system")
+
+    async def test_automatic_theme_tracks_os_changes_and_handles_unavailable_or_invalid_preferences(self):
+        (self.root / "data" / "appearance.json").write_text('{"theme": ["invalid"]}', encoding="utf-8")
+        with self.operating_system_appearance(None):
+            async with self.running() as (app, pilot):
+                await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
+                self.assertEqual(app.theme_mode, "system")
+                self.assertEqual(app.theme, "channels-light")
+                with self.operating_system_appearance(True):
+                    await self.wait_for(pilot, lambda: app.theme == "channels-dark")
+                await self.wait_for(pilot, lambda: app.theme == "channels-light")
+                await self.choose_theme(pilot, "dark")
+                await pilot.pause(2.1)
+                self.assertEqual(app.theme, "channels-dark")
+
+    async def test_theme_save_failure_is_visible_and_does_not_disrupt_download(self):
+        (self.root / "data" / "appearance.json").mkdir()
+        before = self.state.read_bytes()
+        async with self.running(notifications=True) as (app, pilot):
+            await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
+            await self.choose_theme(pilot, "dark")
+            self.assertEqual(app.theme, "channels-dark")
+            await self.wait_for(pilot, lambda: bool(app.query("Toast")))
+            self.assertIn("无法保存偏好", str(app.query_one("Toast", Static).render()))
+            self.assertEqual(self.state.read_bytes(), before)
+            await pilot.click(app.query_one(Input))
+            await self.submit(app, pilot)
+            self.assertIn("下载完成", self.status(app))
+
+    async def test_switching_theme_during_download_keeps_the_active_transfer(self):
+        gate = asyncio.Event()
+
+        class Transfer(httpx.AsyncByteStream):
+            async def __aiter__(self):
+                yield b"first-"
+                await gate.wait()
+                yield b"second"
+
+        self.media["/video.mp4"] = (Transfer(), "video/mp4")
+        async with self.running() as (app, pilot):
+            await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
+            app.query_one(Input).value = "https://weixin.qq.com/sph/fixture"
+            await pilot.press("enter")
+            await self.wait_for(pilot, lambda: bool(self.media_requests))
+            await self.choose_theme(pilot, "dark")
+            self.assertTrue(app.busy)
+            self.assertTrue(app.query_one(Input).disabled)
+            self.assertEqual(app.query_one(Input).value, "https://weixin.qq.com/sph/fixture")
+            gate.set()
+            await self.wait_for(pilot, lambda: "下载完成" in self.status(app))
+            self.assertEqual(next((self.root / "downloads").rglob("*.mp4")).read_bytes(), b"first-second")
+
+    @unittest.skipUnless(sys.platform == "linux", "Linux portable Desktop Entry icon relocation")
+    async def test_linux_launcher_icon_is_refreshed_in_the_portable_directory(self):
+        launcher = self.root / "wechat-channels-downloader.desktop"
+        launcher.write_text("[Desktop Entry]\nType=Application\nIcon=/old-location/logo.png\nTerminal=true\n", encoding="utf-8")
+        launcher.chmod(0o755)
+        async with self.running() as (app, pilot):
+            await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
+            text = launcher.read_text(encoding="utf-8")
+            self.assertNotIn("old-location", text)
+            self.assertIn("Icon=" + str(Path(__file__).resolve().parents[1] / "downloader" / "assets" / "logo.png"), text)
+            self.assertEqual(launcher.stat().st_mode & 0o777, 0o755)
+
+
+    async def test_resizing_and_native_caret_keep_normal_input_editing_and_keyboard_download(self):
+        async with self.running() as (app, pilot):
+            field = app.query_one(Input)
+            await self.wait_for(pilot, lambda: not field.disabled)
+            field.value = "微信abc"
+            await pilot.press("home")
+            self.assertEqual(app.native_cursor_position(), field.content_region.offset)
+            await pilot.press("end")
+            self.assertEqual(app.native_cursor_position().x, field.content_region.x + 7)
+            await pilot.press("tab")
+            self.assertIsNone(app.native_cursor_position())
+            widths = []
+            for width, height in ((160, 50), (80, 24), (60, 20), (44, 20), (110, 40)):
+                await pilot.resize_terminal(width, height)
+                await pilot.pause()
+                self.assertEqual(app.screen.has_class("compact"), width < 76)
+                self.assertEqual(app.screen.has_class("narrow"), width < 52)
+                self.assertEqual(app.screen.has_class("short"), height < 32)
+                widths.append(app.query_one("#content").size.width)
+                self.assertLessEqual(app.query_one("#quit").region.bottom, height)
+                await self.choose_theme(pilot, "dark")
+                await pilot.press("tab", "tab")
+                await pilot.press("ctrl+a")
+                field.post_message(events.Paste("https://weixin.qq.com/sph/" + "a" * 250))
+                await pilot.pause()
+                self.assertIsNotNone(app.native_cursor_position(),
+                                     (width, height, app.focused, field.region, field.scroll_offset, field.cursor_screen_offset))
+                self.assertGreater(field.scroll_x, 0)
+            self.assertGreater(widths[0], 100)
+            self.assertGreater(widths[0], widths[1])
+            await pilot.press("ctrl+a")
+            field.post_message(events.Paste("https://weixin.qq.com/sph/fixture"))
+            await pilot.pause()
+            await pilot.press("enter")
+            await self.wait_for(pilot, lambda: "下载完成" in self.status(app))
 
     async def test_share_link_input_supports_normal_editing_without_opening_links(self):
         async with self.running() as (app, pilot):
@@ -642,7 +789,15 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.login_mode = True
         async with self.running(size=(80, 24)) as (app, pilot):
             await self.wait_for(pilot, lambda: "█" in str(app.query_one("#qr", Static).render()))
+            await self.wait_for(pilot, lambda: "增大" in self.status(app))
             self.assertIn("增大", self.status(app))
+            await self.choose_theme(pilot, "dark")
+            self.assertTrue(app.query_one(Input).disabled)
+            self.assertEqual(app.query_one("#qr").styles.background, Color.parse("white"))
+            self.assertEqual(app.query_one("#qr").styles.color, Color.parse("black"))
+            await pilot.resize_terminal(110, 60)
+            await self.wait_for(pilot, lambda: "增大" not in self.status(app))
+            self.assertTrue(app.query_one("#body").scrollable_content_region.contains_region(app.query_one("#qr").region))
 
     async def test_image_jpg_content_type_saves_jpeg_content(self):
         self.feed = {"picInfo": [{"url": "https://media.weixin.qq.com/photo"}]}

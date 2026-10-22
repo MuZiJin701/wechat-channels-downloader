@@ -15,13 +15,17 @@
 | Logo 与入口资源 | 通过（限定范围） | Pillow 生成器断言检查 PNG 透明度、ICO 16–256 尺寸与 1024 ICNS；跨平台入口生成检查 `.app` 元数据、图标可解码和安全路径传递、Linux 图标字段；Windows 不执行 macOS shell/AppleScript 或 Finder |
 | 离线视觉预览 | 已检查（限定范围） | 实际 TUI 导出浅色、深色、60×20 小窗口、结果及黑白扫码状态，检查配色、图标、渐变、对齐和操作区。仅预览进程移除工具环境自带的 NO_COLOR，未改用户/系统环境；SVG 中文字符宽度在预览转换时校正，不能替代目标终端字体或实际光标验收 |
 | Windows 最终便携包 | 通过 | 最终文档及布局调整后重建；包内 Chromium/TUI 离线检查、不同工作目录及含中文/空格/百分号/感叹号/单引号/`&` 的路径检查通过。实际解析两个 EXE 的 PE 图标资源，七种尺寸图像的 SHA-256 与源 ICO 全部一致；压缩包包含 PNG/ICO/ICNS、无 data/downloads；另运行最终 CLI 的真实驱动离线操作通过 |
-| Linux/macOS 本轮 CI | 待推送后执行 | 既有工作流运行完整回归、真实 POSIX PTY（含原生光标启用/恢复）、实际产物离线检查及构建；macOS 构建检查 shell 语法并编译 AppleScript，Linux 校验 Desktop Entry |
+| Ubuntu 24.04 x64 CI | 通过 | 45 项中 41 项通过、4 项 Windows 专属检查跳过；含 Linux 便携图标刷新、源码真实 PTY、实际包内 Chromium/TUI 与真实 PTY、Desktop Entry 校验、构建及上传 |
+| macOS 14 arm64 CI | 通过 | 45 项中 40 项通过、4 项 Windows 专属和1项 Linux 专属检查跳过；类型检查、源码/实际产物真实 PTY、包内 Chromium/TUI、`.app` 生成、shell/AppleScript 语法检查、构建及上传 |
+| macOS 15 Intel CI | 通过 | 同上，45 项中 40 项通过、5 项平台专属检查跳过；源码/实际产物真实 PTY、包内 Chromium/TUI 与 `.app` 启动器构建检查全部通过，压缩包已上传 |
 
 本轮初次缩放回归发现旧尺寸参与 compact/short 判断，以及首次粘贴长链接可能未滚至插入点；已使用 Resize 的实际尺寸并在布局稳定后揭示输入位置，新增流程覆盖这些情况。窄窗口的主题选择器仅在空间不足时另起一行，为输入和下载保留更多可用高度。
 
 二维码提示在每次实际绘制后检查可见区域，仅在裁剪状态变化时更新，并保留扫码服务的正常提示；覆盖小窗口提示、扫码中切换主题、放大后提示消失且二维码完整可见，避免布局更新顺序或服务状态文字覆盖尺寸提示。Windows 通过会话内 OSC 12 临时匹配输入光标颜色，并在正常退出时请求 OSC 112 恢复宿主默认色；相关能力核对参考微软[终端解析实现](https://github.com/microsoft/terminal/blob/main/src/terminal/parser/OutputStateMachineEngine.cpp)。
 
 中途完整检查的“额外安全验证”分支失败，定位到模拟页面在服务端拒绝时仍直接写成功 Cookie，且定时轮询允许请求重叠。修正夹具仅由模拟服务端在允许登录时设置 Cookie，并串行轮询；没有改应用的安全判断或放宽断言。修正后的安全拦截、正常扫码、访客扫码和二维码缩放四项回归通过，再运行完整回归确认最终结果。打包 CLI 内的 UI、主题与 smoke 字节码已逐一与当前源码编译结果比较一致。
+
+本轮远程验证：[Actions 39739234787](https://github.com/MuZiJin701/wechat-channels-downloader/actions/runs/39739234787)，代码提交 `105be66`。三个平台均成功，源码及实际产物日志均含 `TERMINAL_OK`，包内浏览器检查含 `SMOKE_OK`；Artifacts 提供 Linux x64、macOS arm64/x64 压缩包，Windows 压缩包位于本地 `dist/wechat-channels-downloader-windows-x64.zip`。此结果以仅文档提交补充，使用 `[skip ci]`，不重复构建已验证的相同程序。
 
 Linux Desktop Entry 的图标字段要求绝对路径；便携包第一次运行或移动目录后运行会原子刷新自身入口的路径，保留权限和其他分组，不安装系统图标。首次打开包目录或移动后尚未运行时，文件管理器可能暂不显示 Logo，且可能需要刷新缓存。macOS `.app` 是与控制台程序共处同一便携目录的启动器，仍由 Terminal 运行 TUI；不能只移动 `.app`，数据继续在包外。未签名或公证，首次打开或控制 Terminal 可能需要系统授权。
 

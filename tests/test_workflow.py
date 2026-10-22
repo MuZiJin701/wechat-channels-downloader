@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 import httpx
 from PIL import Image, ImageDraw
-from textual.widgets import Input, Static
+from textual import events
+from textual.widgets import Input, Link, Static
 from textual.color import Color
 
 from downloader.app import DownloaderApp
@@ -203,13 +204,24 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_tui_has_its_own_theme_and_keyboard_actions_without_function_keys(self):
         async with self.running() as (app, pilot):
             await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
-            self.assertEqual(app.screen.styles.background, Color.parse("#080f13"))
+            self.assertEqual(app.screen.styles.background, Color.parse("#ded0ee"))
             self.assertEqual(app.query_one("#qr").styles.background, Color.parse("white"))
             self.assertEqual(app.query_one("#qr").styles.color, Color.parse("black"))
             self.assertTrue(app.query_one(Input).display)
+            repository = app.query_one("#repository", Link)
+            self.assertEqual(repository.text, "GitHub · MuZiJin701/wechat-channels-downloader ↗")
+            self.assertFalse(app.query("#github"))
             with patch("webbrowser.open") as opened:
                 await pilot.press("ctrl+g")
+                opened.assert_not_called()
+                await pilot.click(repository)
                 opened.assert_called_once_with("https://github.com/MuZiJin701/wechat-channels-downloader", new=2)
+                opened.reset_mock()
+                await pilot.press("tab", "shift+tab", "enter")
+                opened.assert_called_once_with("https://github.com/MuZiJin701/wechat-channels-downloader", new=2)
+            with patch("webbrowser.open", return_value=False), patch.object(app, "notify") as notified:
+                await pilot.press("enter")
+                self.assertIn("github.com/MuZiJin701/wechat-channels-downloader", notified.call_args.args[0])
             self.assertNotIn("元宝", self.status(app))
             with patch("os.startfile", create=True) as windows_open, patch("subprocess.Popen") as unix_open:
                 await pilot.press("ctrl+o")
@@ -217,6 +229,33 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                     windows_open.assert_called_once_with(self.root / "downloads")
                 else:
                     self.assertEqual(unix_open.call_args.args[0][-1], str(self.root / "downloads"))
+
+    async def test_share_link_input_supports_normal_editing_without_opening_links(self):
+        async with self.running() as (app, pilot):
+            field = app.query_one(Input)
+            await self.wait_for(pilot, lambda: not field.disabled)
+            self.assertEqual(field.placeholder, "粘贴视频号分享链接")
+            with patch("webbrowser.open") as opened:
+                await pilot.click(field)
+                await pilot.press("a", "b", "c", "ctrl+a", "x")
+                self.assertEqual(field.value, "x")
+                await pilot.press("home", "delete", "a", "b", "c", "home", "right", "shift+end", "ctrl+c")
+                self.assertEqual(app.clipboard, "bc")
+                await pilot.press("ctrl+x")
+                self.assertEqual(field.value, "a")
+                await pilot.press("ctrl+v", "end", "backspace")
+                self.assertEqual(field.value, "ab")
+                await pilot.press("ctrl+a")
+                field.post_message(events.Paste("https://weixin.qq.com/sph/fixture"))
+                await pilot.pause()
+                self.assertEqual(field.value, "https://weixin.qq.com/sph/fixture")
+                await pilot.click(field, offset=(5, 1))
+                self.assertTrue(field.has_focus)
+                await pilot.mouse_down(field, offset=(2, 1))
+                await pilot.hover(field, offset=(8, 1))
+                await pilot.mouse_up(field, offset=(8, 1))
+                self.assertTrue(field.selected_text)
+                opened.assert_not_called()
 
     async def test_image_post_saves_all_images_in_order_and_text(self):
         self.feed = {"description": "图文正文", "picInfo": [

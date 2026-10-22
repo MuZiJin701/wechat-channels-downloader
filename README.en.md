@@ -16,7 +16,9 @@ On Windows, avoid semicolons (`;`) in the extraction path: the current packaged 
 
 In an existing terminal, run `./wechat-channels-downloader-cli.exe` on Windows or `./wechat-channels-downloader` on Linux/macOS to reuse that terminal. Both entry methods share the TUI, Chromium, and portable data. Keep both Windows EXEs beside `_internal/`; the CLI entry lets the invoking shell wait correctly for exit.
 
-The interface uses a deep ink background, vivid green primary color, and cyan accents, keeping the terminal's font size and a black-and-white QR area. Branding is above the current task, with repository information and a GitHub button below. Visit the repository to leave a Star if you find it useful. An existing `NO_COLOR` setting is respected.
+The interface uses a richer light lavender background, deep purple primary actions, muted purple-gray secondary controls, and dark text. Success, warnings, and errors have distinct semantic colors and text. A continuous canvas and whitespace emphasize the current task without an enclosing card. The terminal's font size is retained, QR codes stay static black and white, and small windows reflow or scroll. An existing `NO_COLOR` setting is respected.
+
+The footer text link `GitHub · MuZiJin701/wechat-channels-downloader ↗` opens by clicking or focusing with Tab / Shift+Tab and pressing Enter. There is no dedicated GitHub button or shortcut.
 
 On a Linux server, use an SSH session with a terminal allocated, enter the extracted directory, and run `./wechat-channels-downloader`. To launch directly from another machine, use `ssh -t host 'cd extracted-directory && ./wechat-channels-downloader'`. The program uses the current terminal; it does not bundle a terminal emulator.
 
@@ -31,9 +33,11 @@ Paste one share link, then press Enter or click “下载”. The interface keep
 | Download | Enter in the input |
 | Retry the failed operation | Ctrl+R |
 | Open downloads | Ctrl+O |
-| Visit the GitHub repository | Ctrl+G |
+| Select all input text | Ctrl+A in the input |
 | Quit | Ctrl+Q |
 | Move focus / activate a button | Tab, Shift+Tab / Enter, Space |
+
+The single-line text field shows “粘贴视频号分享链接” when empty, without an example URL. Click to position the cursor or drag to select; Home / End, arrows, Shift selection, Backspace, Delete, copy, cut, and paste are supported. The application does not turn the input into a hyperlink. System clipboard paste and host link detection for actual URLs depend on terminal support and still need acceptance in Windows Terminal or the target terminal; global terminal settings are not changed.
 
 Every run creates a new `author_excerpt` directory under `downloads/`. Chinese names are retained; absent authors are omitted and missing text falls back to the share identifier. Invalid characters are cleaned and long names shortened while preserving the full original text. Media names reuse the prefix and identify purpose, order, or codec. Collisions add a numeric suffix without overwriting previous downloads. Each directory contains:
 

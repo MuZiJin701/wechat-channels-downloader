@@ -272,6 +272,9 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("2024-01-01", await page.locator("body").inner_text())
             self.assertIn("UTC", await page.locator("body").inner_text())
             self.assertNotIn("fixture-private", await page.content())
+            for image in await page.locator("img").all():
+                await image.scroll_into_view_if_needed()
+                await image.evaluate("image => image.decode()")
             self.assertTrue(await page.locator("img").evaluate_all("items => items.every(i => i.complete && i.naturalWidth === 4)"))
 
     async def test_failed_attachment_keeps_other_resources_and_reports_partial_archive(self):

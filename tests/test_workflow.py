@@ -12,10 +12,11 @@ from unittest.mock import patch
 import httpx
 from PIL import Image, ImageDraw
 from textual import events
-from textual.widgets import Input, Link, Select, Static
+from textual.widgets import Button, Input, Link, Select, Static
 from textual.color import Color
 
 from downloader.app import DownloaderApp
+from downloader.appearance import terminal_logo
 
 
 class WorkflowTests(unittest.IsolatedAsyncioTestCase):
@@ -245,6 +246,27 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         await pilot.click("#theme-mode")
         await pilot.press("home", *(["down"] * ("system", "light", "dark").index(mode)), "enter")
         await pilot.pause()
+
+    async def test_logo_and_controls_use_high_contrast_and_symmetric_borders(self):
+        async with self.running() as (app, pilot):
+            await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
+            for mode in ("light", "dark"):
+                await self.choose_theme(pilot, mode)
+                for small, dimensions in ((False, (110, 40)), (True, (60, 20))):
+                    await pilot.resize_terminal(*dimensions)
+                    await pilot.pause()
+                    drawing = terminal_logo(app.current_theme.accent, small=small)
+                    self.assertNotIn("▀", drawing.plain)
+                    self.assertEqual(drawing.style, app.current_theme.accent)
+                    self.assertEqual(len(drawing.plain.splitlines()), 4 if small else 7)
+                    self.assertLessEqual(max(map(len, drawing.plain.splitlines())), 8 if small else 14)
+                    for control in app.query("Button, SelectCurrent, SelectOverlay"):
+                        for edge in ("top", "bottom", "left", "right"):
+                            self.assertEqual(getattr(control.styles, "border_" + edge)[0], "solid")
+                    button = app.query_one("#download", Button)
+                    button.focus()
+                    await pilot.pause()
+                    self.assertEqual(button.styles.border_left[0], "solid")
 
     async def test_theme_selection_is_immediate_saved_and_does_not_change_session_or_input(self):
         before = self.state.read_bytes()

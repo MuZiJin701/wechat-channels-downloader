@@ -70,6 +70,9 @@ class DownloaderApp(App[None]):
     #theme-control { width: 20; height: auto; }
     #theme-label { color: $muted; height: 1; }
     Select { width: 100%; }
+    Select > SelectCurrent, Select > SelectOverlay { border: solid $line; background: $panel; }
+    Select:hover > SelectCurrent { border: solid $accent; background: $surface; }
+    Select:focus > SelectCurrent, Select > SelectOverlay:focus { border: solid $accent; }
     #ribbon { height: 1; margin: 0 4; }
     #body { height: 1fr; min-height: 1; align: center middle; }
     #content { width: 100%; height: auto; margin: 1 4; padding: 1 2; }
@@ -91,12 +94,13 @@ class DownloaderApp(App[None]):
     Input>.input--cursor { background: transparent; color: $foreground; text-style: none; }
     Input.empty>.input--cursor { color: $muted; }
     #actions { height: auto; }
-    Button { margin-right: 1; min-width: 16; background: $panel; color: $foreground; border: tall $panel; }
-    Button:hover { background: $surface; border: tall $surface; }
-    Button:focus { border: tall $accent; text-style: bold; }
-    #download { background: $primary; color: $button-fg; border: tall $primary; text-style: bold; }
-    #download:hover { background: $accent; border: tall $accent; }
-    #download:focus { border: tall $foreground; }
+    Button { margin-right: 1; min-width: 16; background: $panel; color: $foreground; border: solid $line; }
+    Button.-active { border: solid $accent; }
+    Button:hover { background: $surface; border: solid $accent; }
+    Button:focus { border: solid $foreground; text-style: bold; }
+    #download { background: $primary; color: $button-fg; border: solid $accent; text-style: bold; }
+    #download:hover { background: $accent; border: solid $foreground; }
+    #download:focus { border: solid $foreground; }
     #approve { width: 100%; margin-top: 1; }
     #result { height: auto; margin-bottom: 1; color: $muted; }
     #details { height: auto; margin-top: 1; }
@@ -220,7 +224,7 @@ class DownloaderApp(App[None]):
         small = self.size.width < 76 or self.size.height < 32
         logo = self.query_one("#logo", Static)
         logo.styles.width, logo.styles.height = (8, 4) if small else (14, 7)
-        logo.update(terminal_logo(self.current_theme.background or "#88a28c", 8 if small else 14))
+        logo.update(terminal_logo(self.current_theme.accent or "#164b2b", small=small))
         colors = self.current_theme.variables
         self.query_one("#ribbon", Static).update(LinearGradient(0, [
             (0, colors["gradient-start"]), (1, colors["gradient-end"])]))

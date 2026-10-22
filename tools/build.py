@@ -109,12 +109,17 @@ def main() -> None:
     shutil.copytree(ROOT / "licenses", package / "_internal" / "licenses", dirs_exist_ok=True)
     system = platform.system().lower()
     create_launcher(package, system)
-    binary = package / (NAME + ("-cli.exe" if system == "windows" else ""))
+    binary = package / (NAME + (".exe" if system == "windows" else ""))
     if system == "windows":
-        for suffix, subsystem in ((".exe", 2), ("-cli.exe", 3)):
-            image = (package / (NAME + suffix)).read_bytes()
-            header = struct.unpack_from("<I", image, 0x3c)[0]
-            assert struct.unpack_from("<H", image, header + 24 + 68)[0] == subsystem, "Wrong Windows entry subsystem"
+        from xml.etree import ElementTree
+        from PyInstaller.utils.win32.winmanifest import read_manifest_from_executable  # type: ignore[import-untyped]
+        assert {path.name for path in package.glob("*.exe")} == {binary.name}, "Unexpected Windows entry"
+        image = binary.read_bytes()
+        header = struct.unpack_from("<I", image, 0x3c)[0]
+        assert struct.unpack_from("<H", image, header + 24 + 68)[0] == 3, "Wrong Windows entry subsystem"
+        manifest = ElementTree.fromstring(read_manifest_from_executable(str(binary)))
+        policy = manifest.find(".//{http://schemas.microsoft.com/SMI/2024/WindowsSettings}consoleAllocationPolicy")
+        assert policy is not None and policy.text == "detached", "Console allocation policy is missing"
     with tempfile.TemporaryDirectory() as working_directory:
         subprocess.run([str(binary), "--smoke-test"], cwd=working_directory, check=True, timeout=120)
         if system == "windows":

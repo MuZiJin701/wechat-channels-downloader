@@ -1,4 +1,4 @@
-"""One shared dependency directory, a windowless entry and a terminal entry."""
+"""One console entry with opt-in console allocation on supported Windows."""
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_all, copy_metadata
@@ -22,8 +22,7 @@ datas.append((str(root / "downloader" / "assets"), "downloader/assets"))
 a = Analysis([str(root / "main.py")], pathex=[str(root)], binaries=binaries, datas=datas,
              hiddenimports=hiddenimports)
 pyz = PYZ(a.pure)
-console = EXE(pyz, a.scripts, [], exclude_binaries=True, name=name + "-cli", console=True,
+console = EXE(pyz, a.scripts, [], exclude_binaries=True, name=name, console=True,
+              manifest=str(root / "tools" / "windows.manifest"),
               icon=str(root / "downloader" / "assets" / "logo.ico"))
-window = EXE(pyz, a.scripts, [], exclude_binaries=True, name=name, console=False,
-             disable_windowed_traceback=True, icon=str(root / "downloader" / "assets" / "logo.ico"))
-COLLECT(window, console, a.binaries, a.datas, name=name)
+COLLECT(console, a.binaries, a.datas, name=name)

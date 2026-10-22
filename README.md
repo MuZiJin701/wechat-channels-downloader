@@ -10,11 +10,11 @@
 
 Windows 解压路径请避开分号 `;`：当前打包运行时在这类路径下无法加载必要 DLL。中文、空格及其他常见路径字符另有离线产物检查。
 
-- Windows：双击 `wechat-channels-downloader.exe`。无控制台启动器直接请求独立 Windows Terminal 窗口，优先 PowerShell 7（`pwsh`），缺失时依次使用 Windows PowerShell、cmd；不先创建传统控制台。Windows Terminal 不可用或启动失败时回退系统控制台，不自动安装软件或改变系统默认设置。
+- Windows：双击 `wechat-channels-downloader.exe`，优先打开独立 Windows Terminal 窗口，依次选择 PowerShell 7（`pwsh`）、Windows PowerShell、cmd；Terminal 不可用或启动失败时回退系统控制台。Windows 11 24H2（26100）及以上通过启动清单避免先自动创建控制台；更早 Windows 11 仍可运行，但可能短暂显示初始控制台。不要求管理员权限，不自动安装软件或改变系统默认设置。
 - macOS：双击带图标的 `wechat-channels-downloader.app`，它会打开 Terminal 运行同一 TUI。保留整个解压目录，不能只移动启动器；首次可能需要允许打开或控制 Terminal。包按 Intel / Apple Silicon 分别构建；未进行 Apple 签名或公证。
 - Ubuntu 桌面：使用 `wechat-channels-downloader.desktop`。桌面环境可能要求先允许启动；需要系统具备 Chromium 所需的动态库。图标采用绝对路径，首次启动或移动目录后的下一次启动会刷新自身入口的图标引用；文件管理器可能需要刷新。该入口的真实桌面双击行为仍需人工验收。
 
-在已有终端运行 Windows 的 `./wechat-channels-downloader-cli.exe`，或 Linux/macOS 的 `./wechat-channels-downloader`，会直接复用当前终端。两种入口共用 TUI、Chromium 和便携数据。Windows 两个 EXE 均需与 `_internal/` 保持在一起；命令行入口能让调用它的 shell 正确等待退出。
+在已有终端运行 Windows 的 `./wechat-channels-downloader.exe`，或 Linux/macOS 的 `./wechat-channels-downloader`，会直接复用当前终端，shell 等待程序退出。Windows 双击和终端运行使用同一个应用 EXE；仍须保留整个解压目录，包括 `_internal/` 中的 Chromium 和依赖。
 
 界面使用鼠尾草绿浅色、森林绿深色两套主题，品牌区展示播放与保存标志和静态渐变，成功、警告和错误另有语义颜色及文字。顶部“外观”选择器支持鼠标及键盘，提供“跟随系统 / 浅色 / 深色”；首次默认跟随系统，选择立即生效并保存，切换不影响扫码、下载、输入及结果。
 
@@ -98,7 +98,7 @@ uv run --locked python tools/check_terminal.py "$PWD/.venv/bin/python" "$PWD/mai
 
 macOS 构建将 Chromium 的完整应用目录及符号链接复制到包内，保留浏览器原有签名，避免 PyInstaller 重新处理其框架。
 
-Logo 原图和各平台图标位于 `downloader/assets/`。修改图形后运行 `uv run --locked python tools/draw_logo.py`，使用已有 Pillow 同步生成 PNG、Windows ICO 与 macOS ICNS；主界面按相同图形生成字符块版本，不在具体控件上放 Logo。打包保留图标资源，macOS 构建另检查启动脚本语法并编译 AppleScript；实际 Finder/Terminal 交互需人工验收。
+Logo 原图和各平台图标位于 `downloader/assets/`。修改程序图标后运行 `uv run --locked python tools/draw_logo.py`，使用已有 Pillow 同步生成 PNG、Windows ICO 与 macOS ICNS。主界面使用专门按终端格子绘制的纯色、高对比播放与下载标志，避免缩小图片的条纹；按钮和外观选择框采用对称细线边框，保留焦点、悬停及禁用反馈。打包保留高清图标资源，macOS 构建另检查启动脚本语法并编译 AppleScript；实际 Finder/Terminal 交互需人工验收。
 
 若已有输出目录包含 `data/` 或 `downloads/`，构建会拒绝覆盖；先将旧程序与数据整体移到其他位置。压缩包生成后还会检查不含这两个私有目录，发现时取消归档并保留本地数据。
 

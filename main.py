@@ -4,10 +4,10 @@ from pathlib import Path
 
 
 def main() -> None:
-    if sys.platform == "win32" and getattr(sys, "frozen", False) and sys.stdin is None:
+    if sys.platform == "win32" and getattr(sys, "frozen", False) and sys.argv[1:] != ["--smoke-test"]:
         from downloader.launcher import launch
-        launch()
-        return
+        if not launch():
+            return
     import asyncio
     if getattr(sys, "frozen", False):
         os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(Path(__file__).resolve().parent / "browsers")

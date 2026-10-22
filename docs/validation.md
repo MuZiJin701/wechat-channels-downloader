@@ -2,6 +2,28 @@
 
 验证对象：2026-10-22 启动与界面改版、Spec #2 的动态完整归档与终端体验，以及下方保留的历史记录。自动化只使用临时登录态与模拟外部服务；本文件不把模拟检查写成真实业务验收。
 
+## Windows 单 EXE、简化 Logo 与对称控件（2026-10-22）
+
+用户整体确认方案并授权“实现代码，提交不推送，先验证windows系统即可”。Windows 使用单个 Console EXE 和 `detached` 清单；已有终端原地运行，双击移交独立 Windows Terminal，沿用 shell 优先级，失败时直接使用或分配控制台并恢复缺失的 Python/Textual 标准流。品牌区改为专门绘制的纯色字符标志，程序高清图标保留；按钮、外观选择框及其下拉列表均采用对称细边框。未新增依赖、修改系统设置或读取真实账户。
+
+本机 Windows x64 Build 26300，Python 3.11.17，锁定 PyInstaller 6.22.3。以下仅记录本轮 Windows 范围；旧版跨平台 CI 结果不覆盖此次变更。
+
+| 检查 | 状态 | 实际范围 |
+| --- | --- | --- |
+| strict 类型检查 | 通过 | `uv run --locked mypy`，11 个源文件，仅 Windows 配置 |
+| 完整回归 | 通过 | 50 项，162.599 秒，48 项通过；POSIX PTY、Linux 图标刷新两项按平台明确跳过。真实 Chromium、临时会话和模拟外部服务；最终仅细化大尺寸字符标志后，重新运行相关控件/Logo 流程通过 |
+| Windows 启动边界 | 通过（模拟系统服务） | 8 项启动检查覆盖继承/附着父控制台、旧系统初始控制台、自身重启防循环、shell 优先及安全参数、Terminal 缺失/失败回退、缺失标准流恢复且保留有效流、启动失败非零退出与错误脱敏 |
+| 控件与 Logo 流程 | 通过 | 浅/深主题、110×40 与 60×20，按钮、选择器及下拉列表四边均为 solid；保留主题选择和键盘交互，字符标志不再含半格前背景色图像，宽高符合两个布局。原有连续 resize、输入和下载保护回归继续通过 |
+| 源码及实际 EXE 真实终端驱动 | 通过（限定范围） | `--terminal-smoke-test` 使用离线临时 Chromium 会话，在 Windows 控制台/伪终端实际操作主题选择、文本输入、Home、Ctrl+Q；返回 SMOKE_OK，实际 EXE 输出包含闪烁细竖线启用和默认光标恢复序列 |
+| 无控制台的原生启动与回退 | 通过（限定范围） | 本地检查器先仅脱离自身控制台，再用 Windows CreateProcess、空标准句柄和 CREATE_NEW_CONSOLE 启动实际 EXE。真实 Windows Terminal 启动一个应用子进程并完成离线 TUI；原进程及 TUI 子进程均以 0 退出。仅对子进程清空 PATH 后，Terminal 不可发现，实际控制台分配、流恢复和完整离线 TUI 正常退出；没有修改用户或系统 PATH |
+| 实际 shell 与特殊路径 | 通过 | 将最终包硬链接复制到含中文、空格、`% ! ' &` 的临时路径，实际执行启动器生成的 PowerShell 7、Windows PowerShell、cmd 命令，均以 0 退出并返回 SMOKE_OK；引用及重启参数正常，无新增 data/downloads |
+| Windows 便携包 | 通过 | 实际构建、检查唯一顶层应用 EXE、PE Console 子系统以及嵌入资源中的 detached 清单；不同工作目录及特殊路径下的 Chromium/TUI 离线 smoke；归档不含 data/downloads，顶层仅双 README 使用文档，内部许可和高清图标保留。最终包内 launcher、appearance、app 代码对象与当前源码编译结果相等，ZIP 内 EXE 与解压目录中的 EXE 字节相同 |
+| 离线视觉预览 | 已检查（限定范围） | 实际 TUI 导出浅色、深色及小窗口图像，检查纯色标志与对称边框。预览进程单独移除 NO_COLOR、使用真彩色并校正 SVG 中文宽度；不修改用户环境，不能替代实际桌面字体和人工视觉验收 |
+
+旧 `dist/wechat-channels-downloader/` 含便携数据，构建前已将整个目录保留为 `dist/wechat-channels-downloader-before-single-exe-20261022/`，其中 data/downloads 保留；未读取、迁移或打包其内容。新包为 `dist/wechat-channels-downloader-windows-x64.zip`，解压目录仍为 `dist/wechat-channels-downloader/`。
+
+未验证：更早 Windows 11 实机及其闪窗表现、文件管理器鼠标双击与人眼无闪窗验收、真实微信扫码/线上下载、系统剪贴板；Linux/macOS 本轮按用户要求未运行、构建或触发 CI。原生 Windows API 启动与自动终端操作不等于人工桌面验收。旧系统单进程控制台按双击路径处理，shell-less 自定义 Windows 宿主未验收；现有 Windows 分号路径限制继续适用。本轮不推送。
+
 ## 绿系双主题、自适应、原生光标与 Logo（2026-10-22）
 
 本轮按用户整体确认及“实现代码，更新相关文档，提交推送”的授权实施。增加绿色浅/深主题、默认跟随系统及本地偏好、品牌 Logo 与静态渐变、按宽度和高度调整布局、原生细竖线输入光标、三平台图标及 macOS `.app` 终端启动器。主题偏好使用独立的 `data/appearance.json` 原子保存；没有新增依赖、迁移真实登录态或修改全局终端设置。

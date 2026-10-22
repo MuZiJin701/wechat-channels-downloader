@@ -8,8 +8,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PIL import Image
-from rich.style import Style
 from rich.text import Text
 from textual.theme import Theme
 
@@ -71,19 +69,10 @@ def save_mode(root: Path, mode: str) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def terminal_logo(background: str, size: int) -> Text:
-    with Image.open(Path(__file__).with_name("assets") / "logo.png") as source:
-        image = source.convert("RGBA").resize((size, size), Image.Resampling.LANCZOS)
-    image = Image.alpha_composite(Image.new("RGBA", image.size, background), image).convert("RGB")
-    result = Text(no_wrap=True)
-    for y in range(0, size, 2):
-        for x in range(size):
-            upper = image.getpixel((x, y))
-            lower = image.getpixel((x, y + 1))
-            result.append("▀", Style(color=f"rgb{upper}", bgcolor=f"rgb{lower}"))
-        if y + 2 < size:
-            result.append("\n")
-    return result
+def terminal_logo(color: str, *, small: bool) -> Text:
+    drawing = ("   ▶\n   │\n   ▼\n └───┘" if small else
+               "    ██\n    ████\n    ██████\n    ████\n    ██\n      ↓\n  └───────┘")
+    return Text(drawing, style=color, no_wrap=True)
 
 
 def refresh_desktop_icon(root: Path) -> None:

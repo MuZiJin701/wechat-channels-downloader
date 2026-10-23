@@ -10,6 +10,7 @@ from pathlib import Path
 import httpx
 from textual import events, work
 from textual.app import App, ComposeResult
+from textual.driver import Driver
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.geometry import Offset, Region, Size
 from textual.errors import NoWidget
@@ -17,7 +18,8 @@ from textual.renderables.gradient import LinearGradient
 from textual.widgets import Button, Collapsible, Input, Link, LoadingIndicator, Select, Static
 from rich.text import Text
 
-from .appearance import MODES, THEMES, load_mode, refresh_desktop_icon, save_mode, system_dark, terminal_logo
+from .appearance import MODES, THEMES, load_mode, refresh_desktop_icon, save_mode, system_dark
+from .logo import TerminalLogo, probe_terminal
 from .service import BrowserSetup, LoginRequired, PRIVACY, TERMS, Session, UserError
 
 
@@ -62,8 +64,9 @@ class DownloaderApp(App[None]):
     Screen { background: $background; color: $foreground; }
     #brand { width: 100%; height: auto; padding: 1 4; align-vertical: middle; }
     #identity { width: 1fr; height: auto; align-vertical: middle; }
-    #logo { width: 14; height: 7; }
-    #brand-copy { width: 1fr; height: auto; margin: 0 3; }
+    #logo { display: none; }
+    #brand-copy { width: 1fr; height: auto; }
+    .with-logo #brand-copy { margin-left: 2; }
     #brand-kicker { color: $muted; height: 1; }
     #brand-title { color: $foreground; text-style: bold; height: auto; margin: 1 0; }
     #brand-note { color: $muted; height: auto; }
@@ -113,7 +116,6 @@ class DownloaderApp(App[None]):
     .compact #content { margin: 0; padding: 1; }
     .compact #brand { margin: 0; padding: 0 1; }
     .narrow #brand { layout: vertical; }
-    .compact #brand-copy { margin: 0 2; }
     .narrow #theme-control { width: 100%; }
     .compact #theme-label { display: none; }
     .compact #bottom { margin: 0; padding: 0 1; }
@@ -145,11 +147,19 @@ class DownloaderApp(App[None]):
         self.approval = asyncio.Event()
         self.busy = False
         self.retry_download = False
+        self.logo = TerminalLogo()
+        self.logo_pending = ""
+
+    def _build_driver(self, headless: bool, inline: bool, mouse: bool, size: tuple[int, int] | None) -> Driver:
+        # shortcut: Textual 8 has no graphics probing API; probe before its input thread starts.
+        protocol, cell, self.logo_pending = probe_terminal(enabled=not headless)
+        self.logo.load(protocol, cell)
+        return super()._build_driver(headless, inline, mouse, size)
 
     def compose(self) -> ComposeResult:
         with Horizontal(id="brand"):
             with Horizontal(id="identity"):
-                yield Static("", id="logo")
+                yield self.logo
                 with Vertical(id="brand-copy"):
                     yield Static("CHANNELS  /  本地归档", id="brand-kicker")
                     yield Static("微信视频号下载", id="brand-title")
@@ -199,6 +209,10 @@ class DownloaderApp(App[None]):
         stage.set_classes(state)
 
     def on_mount(self) -> None:
+        if self.logo_pending:
+            from textual._xterm_parser import XTermParser
+            for event in XTermParser().feed(self.logo_pending):
+                self.post_message(event)
         self.update_layout(self.size)
         self.update_brand()
         self.refresh_system_theme()
@@ -221,10 +235,13 @@ class DownloaderApp(App[None]):
         self.screen.set_class(size.height < 32, "short")
 
     def update_brand(self) -> None:
-        small = self.size.width < 76 or self.size.height < 32
-        logo = self.query_one("#logo", Static)
-        logo.styles.width, logo.styles.height = (8, 4) if small else (14, 7)
-        logo.update(terminal_logo(self.current_theme.accent or "#164b2b", small=small))
+        show_logo = bool(self.logo.protocol) and self.size.height >= 32
+        self.logo.display = show_logo
+        self.screen.set_class(show_logo, "with-logo")
+        if show_logo:
+            height = 3 if self.size.width < 76 else 5
+            self.logo.styles.width = (height * self.logo.cell.height + self.logo.cell.width - 1) // self.logo.cell.width
+            self.logo.styles.height = height
         colors = self.current_theme.variables
         self.query_one("#ribbon", Static).update(LinearGradient(0, [
             (0, colors["gradient-start"]), (1, colors["gradient-end"])]))
@@ -274,7 +291,7 @@ class DownloaderApp(App[None]):
         if self._driver is None or self.is_headless or not self.is_running:
             return
         position = self.native_cursor_position()
-        sequence = "\x1b[?25l"
+        sequence = "\x1b[?25l\x1b7" + self.logo.draw() + "\x1b8"
         if position is not None:
             color = self.current_theme.foreground
             if sys.platform == "win32" and color != self.native_cursor_color:
@@ -455,7 +472,8 @@ class DownloaderApp(App[None]):
             await self.session.close()
         finally:
             if self._driver is not None and not self.is_headless:
-                self._driver.write("\x1b[0 q\x1b[?25h" + ("\x1b]112\x07" if self.native_cursor_color else ""))
+                self._driver.write(self.logo.clear() + "\x1b[0 q\x1b[?25h"
+                                   + ("\x1b]112\x07" if self.native_cursor_color else ""))
                 self._driver.flush()
 
 

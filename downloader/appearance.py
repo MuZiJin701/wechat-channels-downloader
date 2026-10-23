@@ -8,7 +8,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-from rich.text import Text
 from textual.theme import Theme
 
 THEMES = (
@@ -67,12 +66,6 @@ def save_mode(root: Path, mode: str) -> None:
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
-
-
-def terminal_logo(color: str, *, small: bool) -> Text:
-    drawing = ("   ▶\n   │\n   ▼\n └───┘" if small else
-               "    ██\n    ████\n    ██████\n    ████\n    ██\n      ↓\n  └───────┘")
-    return Text(drawing, style=color, no_wrap=True)
 
 
 def refresh_desktop_icon(root: Path) -> None:

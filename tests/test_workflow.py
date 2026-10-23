@@ -14,9 +14,10 @@ from PIL import Image, ImageDraw
 from textual import events
 from textual.widgets import Button, Input, Link, Select, Static
 from textual.color import Color
+from textual.geometry import Size
 
 from downloader.app import DownloaderApp
-from downloader.appearance import terminal_logo
+from downloader.logo import probe_terminal
 
 
 class WorkflowTests(unittest.IsolatedAsyncioTestCase):
@@ -247,7 +248,7 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
         await pilot.press("home", *(["down"] * ("system", "light", "dark").index(mode)), "enter")
         await pilot.pause()
 
-    async def test_logo_and_controls_use_high_contrast_and_symmetric_borders(self):
+    async def test_text_brand_and_controls_use_compact_layout_and_symmetric_borders(self):
         async with self.running() as (app, pilot):
             await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
             for mode in ("light", "dark"):
@@ -255,11 +256,8 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                 for small, dimensions in ((False, (110, 40)), (True, (60, 20))):
                     await pilot.resize_terminal(*dimensions)
                     await pilot.pause()
-                    drawing = terminal_logo(app.current_theme.accent, small=small)
-                    self.assertNotIn("▀", drawing.plain)
-                    self.assertEqual(drawing.style, app.current_theme.accent)
-                    self.assertEqual(len(drawing.plain.splitlines()), 4 if small else 7)
-                    self.assertLessEqual(max(map(len, drawing.plain.splitlines())), 8 if small else 14)
+                    self.assertFalse(app.query_one("#logo").display)
+                    self.assertEqual(app.query_one("#brand-copy").region.x, app.query_one("#identity").region.x)
                     for control in app.query("Button, SelectCurrent, SelectOverlay"):
                         for edge in ("top", "bottom", "left", "right"):
                             self.assertEqual(getattr(control.styles, "border_" + edge)[0], "solid")
@@ -267,6 +265,65 @@ class WorkflowTests(unittest.IsolatedAsyncioTestCase):
                     button.focus()
                     await pilot.pause()
                     self.assertEqual(button.styles.border_left[0], "solid")
+
+    async def test_pixel_logo_tracks_theme_resize_overlay_and_download(self):
+        for protocol in ("sixel", "kitty"):
+            with patch("downloader.app.probe_terminal", return_value=(protocol, Size(10, 20), "")):
+                async with self.running(size=(110, 40)) as (app, pilot):
+                    await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
+                    logo = app.query_one("#logo")
+                    self.assertTrue(logo.display)
+                    self.assertEqual(logo.size, Size(10, 5))
+                    light = logo.draw()
+                    self.assertIn("\x1bP0;1q" if protocol == "sixel" else "\x1b_Ga=T", light)
+                    await self.choose_theme(pilot, "dark")
+                    self.assertNotEqual(logo.draw(), light)
+                    self.assertLessEqual(abs(logo.region.y - app.query_one("#brand-copy").region.y), 1)
+                    overlay = Static("遮挡", id="logo-cover")
+                    overlay.styles.layer = "overlay"
+                    overlay.styles.position = "absolute"
+                    overlay.styles.offset = logo.region.offset
+                    overlay.styles.width, overlay.styles.height = logo.size
+                    await app.screen.mount(overlay)
+                    await pilot.pause()
+                    covered = logo.draw()
+                    self.assertNotIn("\x1bP0;1q", covered)
+                    self.assertNotIn("\x1b_Ga=T", covered)
+                    await overlay.remove()
+                    await pilot.resize_terminal(60, 20)
+                    await pilot.pause()
+                    self.assertFalse(logo.display)
+                    self.assertEqual(app.query_one("#brand-copy").region.x, app.query_one("#identity").region.x)
+                    await pilot.resize_terminal(110, 40)
+                    await pilot.pause()
+                    self.assertTrue(logo.display)
+                    await pilot.click(app.query_one(Input))
+                    await self.submit(app, pilot)
+                    self.assertIn("完成", self.status(app))
+                    cleanup = logo.clear()
+                    self.assertTrue(not cleanup or protocol == "kitty")
+
+    async def test_terminal_reports_choose_pixels_or_text_without_leaking_into_input(self):
+        import os
+        environment = {key: value for key, value in os.environ.items()
+                       if key not in ("NO_COLOR", "TMUX", "STY", "TERM_PROGRAM", "KITTY_WINDOW_ID")}
+        environment["TERM"] = "xterm-kitty"
+        for reply, protocol in (("\x1b[6;20;10t\x1b[?61;4c", "sixel"),
+                                ("\x1b_Gi=7319;OK\x1b\\\x1b[6;20;10t\x1b[?62c", "kitty"),
+                                ("\x1b[6;20;10t\x1b[?1;2c", ""),
+                                ("\x1b[6;" + "9" * 4500 + ";10t\x1b[?61;4c", ""),
+                                ("\x1b[6;0;10t\x1b[?61;4c", ""), ("", "")):
+            with (self.subTest(protocol=protocol, reply_size=len(reply)),
+                  patch.dict(os.environ, environment, clear=True),
+                  patch.object(sys.__stdin__, "isatty", return_value=True),
+                  patch.object(sys.__stdout__, "isatty", return_value=True),
+                  patch("downloader.logo.query_terminal", return_value=reply),
+                  patch("downloader.app.probe_terminal", side_effect=lambda **_: probe_terminal(enabled=True))):
+                async with self.running() as (app, pilot):
+                    await self.wait_for(pilot, lambda: not app.query_one(Input).disabled)
+                    self.assertEqual(app.logo.protocol, protocol)
+                    self.assertEqual(app.logo.display, bool(protocol))
+                    self.assertEqual(app.query_one(Input).value, "")
 
     async def test_theme_selection_is_immediate_saved_and_does_not_change_session_or_input(self):
         before = self.state.read_bytes()

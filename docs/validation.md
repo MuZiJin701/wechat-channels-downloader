@@ -1,6 +1,26 @@
 # 验证记录
 
-验证对象：2026-10-22 启动与界面改版、Spec #2 的动态完整归档与终端体验，以及下方保留的历史记录。自动化只使用临时登录态与模拟外部服务；本文件不把模拟检查写成真实业务验收。
+验证对象：2026-10-23 图片 Logo 与文字回退、此前启动与界面改版、Spec #2 的动态完整归档与终端体验，以及下方保留的历史记录。自动化只使用临时登录态与模拟外部服务；本文件不把模拟检查写成真实业务验收。
+
+## 图片 Logo 与文字回退（2026-10-23，仅 Windows 本机）
+
+用户整体确认后授权实现、提交并先验证 Windows 效果。移除字符 Logo，复用已有 PNG，通过 Sixel 或 kitty 协议显示平滑图片，按标题高度缩小并居中。无法确认图片能力、图标不可用、`NO_COLOR`、终端复用器或过矮窗口采用紧凑文字版并收起占位；未新增依赖或改变应用图标资源。启动探测在 Textual 输入线程之前进行，终端模式在 finally 中恢复，协议响应不进入链接框；图片只绘制未被遮挡的可见单元格，kitty 图片在重绘与退出时清理。
+
+本机 Windows x64 Build 26300，Python 3.11.17，Textual 8.2.8、PyInstaller 6.22.3；实际 Windows Terminal 返回 Sixel 能力与 10×20 像素单元格。以下通过结论只覆盖本轮 Windows 范围。
+
+| 检查 | 状态 | 实际范围 |
+| --- | --- | --- |
+| strict 类型检查 | 通过 | `uv run --locked mypy`，12 个源文件，Windows 配置 |
+| 完整回归 | 通过 | `uv run --locked python -m unittest discover -s tests -v`，52 项，185.931 秒；50 项通过，POSIX PTY 与 Linux 图标刷新两项明确跳过；真实 Chromium、临时会话，仅模拟外部服务 |
+| 图像与回退 TUI 流程 | 通过 | 模拟 Sixel/kitty 终端能力，检查尺寸、主题切换、遮挡、小窗口隐藏后恢复与完整下载；验证无图时标题自然左对齐及原有对称控件。探测覆盖正向回复、无图片能力、缺失回复、零尺寸与超长数值，回复不进入链接输入 |
+| 真实 Windows Terminal 源码界面 | 通过（离线限定范围） | 启动真实终端并接收实际协议响应，截图检查浅色、深色、外观下拉列表；实际改变窗口尺寸后图片收起、恢复大窗口后重现，并完成模拟下载、Ctrl+Q 退出。以 `TERM=dumb` 在独立进程模拟无图声明，真实窗口检查紧凑文字版及相同操作。未将内部 SVG 导出作为图片显示证据 |
+| Windows 便携包 | 通过 | 使用只有仓库源码的隔离目录构建，包内单 EXE、Console 子系统、detached 清单、高清图标及原有许可检查通过；不同工作目录和特殊路径下的实际 Chromium/TUI 离线 smoke 均通过；压缩包不含 data/downloads，顶层仅双 README |
+| 实际 EXE 的图片显示与终端退出 | 通过（离线限定范围） | 实际便携 EXE 在真实 Windows Terminal 运行 `--terminal-child --terminal-smoke-test`，窗口截图确认真实图片，离线会话执行主题选择、普通文本编辑、Home 与 Ctrl+Q；退出码 0，包目录未产生个人登录态或下载内容 |
+| 标准构建目录替换 | 通过 | 用户说明旧构建无重要数据并授权覆盖后，将新包放回 `dist/wechat-channels-downloader/`，更新 `dist/wechat-channels-downloader-windows-x64.zip`；替换后再次从其他工作目录运行实际 EXE 的离线 smoke，通过。未读取旧登录态或下载内容 |
+
+临时检查脚本、日志与真实窗口截图位于忽略的 `build/` 中；截图只用于本地检查，不提交或上传。图标编码复用现有 Pillow，来源依据为 [xterm 控制序列](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html)、[kitty 图形协议](https://sw.kovidgoyal.net/kitty/graphics-protocol/)和 [Windows Terminal Sixel 说明](https://devblogs.microsoft.com/commandline/windows-terminal-preview-1-22-release/)。测试子进程单独清除工具环境的 `NO_COLOR` 与 `TERM=dumb` 来检查图片，不修改用户或系统环境。
+
+未构建或运行 Linux/macOS，kitty 路径只有模拟终端/TUI 编码检查，不能宣称对应宿主实机通过；未触发 CI、读取真实账户、人工扫码或真实线上下载，也未进行用户本人视觉验收。像素格尺寸在启动时测量，运行中修改终端字号或 DPI 后需重启以重新测量；本轮未增加实时字体/DPI 重测或复用器透传。此前其他平台及旧 Logo 的通过记录不覆盖本轮新增图像路径。
 
 ## Windows 单 EXE、简化 Logo 与对称控件（2026-10-22）
 

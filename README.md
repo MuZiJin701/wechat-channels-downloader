@@ -98,7 +98,7 @@ uv run --locked python tools/check_terminal.py "$PWD/.venv/bin/python" "$PWD/mai
 
 macOS 构建将 Chromium 的完整应用目录及符号链接复制到包内，保留浏览器原有签名，避免 PyInstaller 重新处理其框架。
 
-Logo 原图和各平台图标位于 `downloader/assets/`。修改程序图标后运行 `uv run --locked python tools/draw_logo.py`，使用已有 Pillow 同步生成 PNG、Windows ICO 与 macOS ICNS。主界面使用专门按终端格子绘制的纯色、高对比播放与下载标志，避免缩小图片的条纹；按钮和外观选择框采用对称细线边框，保留焦点、悬停及禁用反馈。打包保留高清图标资源，macOS 构建另检查启动脚本语法并编译 AppleScript；实际 Finder/Terminal 交互需人工验收。
+Logo 原图和各平台图标位于 `downloader/assets/`。修改程序图标后运行 `uv run --locked python tools/draw_logo.py`，使用已有 Pillow 同步生成 PNG、Windows ICO 与 macOS ICNS。主界面在终端确认图片协议和像素尺寸后显示同一原图，保持比例并与标题居中对齐；支持 Sixel 与 kitty 图片协议。无法确认支持、图标不可用、窗口过矮、`NO_COLOR` 或终端复用器环境中，收起图片及占位，使用紧凑文字品牌区，不再显示像素字符 Logo。macOS 双击使用的系统 Terminal 采用文字版，Linux 取决于桌面选择的终端；无需为了 Logo 安装或更换终端。按钮和外观选择框保留对称细边框、焦点、悬停及禁用反馈。打包保留高清图标资源，macOS 构建另检查启动脚本语法并编译 AppleScript；实际 Finder/Terminal 交互需人工验收。
 
 若已有输出目录包含 `data/` 或 `downloads/`，构建会拒绝覆盖；先将旧程序与数据整体移到其他位置。压缩包生成后还会检查不含这两个私有目录，发现时取消归档并保留本地数据。
 

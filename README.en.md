@@ -59,6 +59,14 @@ If the result is **部分完成** (Partially complete), expand the failure detai
 
 **Why is there no logo image in my terminal?** Image support varies between terminals. A compact text header appears when images are unavailable; downloading still works. Restart the app after changing the terminal font size or display scaling while it is running.
 
+**Why does light mode look gray or pink over SSH, with a banded gradient?** The SSH session may not advertise truecolor support. If your local terminal supports truecolor, such as Windows Terminal, quit with **Ctrl+Q**, then run this in the extracted folder on the server:
+
+```sh
+COLORTERM=truecolor ./wechat-channels-downloader
+```
+
+This applies only to this launch; no new download is needed. Dark mode can also lose color accuracy even if it looks normal. See [SSH color troubleshooting](docs/development.md#ssh-颜色失真) (Chinese) for details.
+
 **Where is my sign-in information?** The `data` folder beside the program stores your session and appearance choice. On Mac, it is outside the `.app`. Do not publish `data`; original information in download folders can also contain temporary access links. To sign in again, close the app and delete `data/session.json`.
 
 ## Keyboard shortcuts

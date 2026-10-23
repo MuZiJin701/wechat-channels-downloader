@@ -71,6 +71,7 @@ TUI 探测到 Sixel 或 kitty 图片能力及像素格尺寸后才绘制原图�
 | 现象 | 排查方式 |
 | --- | --- |
 | Windows 报 DLL 加载失败 | 先确认已完整解压，路径不含分号 `;`，且 `_internal/` 未缺失 |
+| SSH 下浅色偏灰粉、渐变分块 | 检查真彩色声明，见下方 [SSH 颜色失真](#ssh-颜色失真) |
 | 二维码不完整 | 放大终端窗口，按状态区提示操作 |
 | 网络失败但此前已登录 | 优先重试，不删除旧登录态；明确过期时程序会重新扫码 |
 | 想重新扫码或恢复默认外观 | 关闭程序后，仅删除 `data/session.json` 或 `data/appearance.json` 中对应的文件 |
@@ -79,6 +80,26 @@ TUI 探测到 Sixel 或 kitty 图片能力及像素格尺寸后才绘制原图�
 | HTML 不能播放某种视频 | 使用页面文件链接或本地播放器；不将文件存在等同于浏览器可解码 |
 
 只保留最近一次结果；失败详情可展开。重复下载新建目录，部分失败或正常中断保留成功文件，强制杀进程或断电不保证最后记录完整。
+
+### SSH 颜色失真
+
+终端支持图片与支持真彩色是两项独立能力：Logo 显示正常，不代表界面颜色没有降级。本项目使用 Textual/Rich 自动检测颜色；在 Linux SSH 会话中，仅有 `TERM=xterm-256color` 且没有 `COLORTERM` 时，Rich 会按 256 色输出。浅色背景 `#88a28c` 会转换成灰色编号 246；深色背景转换后仍偏绿，不能以深色观感判断真彩色已启用。
+
+在运行程序的同一个 SSH 会话中检查：
+
+```sh
+printf 'TERM=%s\nCOLORTERM=%s\n' "$TERM" "$COLORTERM"
+```
+
+确认本地终端及中间链路支持真彩色后（例如 Windows Terminal 直接 SSH），先退出程序，再在服务器解压目录运行：
+
+```sh
+COLORTERM=truecolor ./wechat-channels-downloader
+```
+
+源码入口同样可用 `COLORTERM=truecolor uv run --locked python main.py`。变量前缀只作用于本次启动，不修改服务器配置；不需要更换主题或重新下载。真正只支持 256 色的终端应保留自动降级，强制声明不会增加终端能力；经过 tmux/screen 时还需确认复用器配置及完整链路支持真彩色。
+
+真彩色只影响颜色精度。“跟随系统”仍读取服务器的外观偏好，不读取 SSH 客户端的 Windows 主题。依据见 [Rich 颜色系统文档](https://rich.readthedocs.io/en/latest/console.html#color-systems)，本次环境与编码核对见[验证记录](validation.md#ssh-颜色降级排查2026-10-23)。
 
 ## 数据与隐私
 

@@ -1,6 +1,6 @@
 # 项目约定
 
-运行与配置见 [中文 README](README.md) / [English README](README.en.md)。
+用户使用见 [中文 README](README.md) / [English README](README.en.md)；源码运行、打包与排查见[开发指南](docs/development.md)，其他文档见[导航](docs/README.md)。
 
 - 使用 uv 和 Python 3.11，提交 uv.lock；同步依赖使用 `uv sync --locked`。
 - 启动：`uv run --locked python main.py`；打包：`uv run --locked python tools/build.py`。

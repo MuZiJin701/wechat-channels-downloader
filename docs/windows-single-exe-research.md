@@ -1,6 +1,6 @@
 # Windows 单应用 EXE 启动方案核实
 
-研究日期：2026-10-22。状态：用户已在 Q5 接受推荐方向，随后整体确认并授权实现、验证 Windows、提交且不推送。本文保留研究时的候选比较及当时未验证项；确认见[需求记录](requirements.md)，后续实际执行结果见[验证记录](validation.md)。
+研究日期：2026-10-22；文档状态于 2026-10-23 同步。推荐的单 Console EXE 与 detached 清单方案已实现。本文保留研究时的候选比较和待验证清单，当前行为见[规格](spec.md)，实际完成范围见[验证记录](validation.md)，访谈确认见[需求记录](requirements.md)。旧 Windows、真实桌面双击等未验收项继续按验证记录标明。
 
 问题范围：同一个 `wechat-channels-downloader.exe` 能双击启动，也能在已有 cmd、Windows PowerShell、PowerShell 7、Windows Terminal 中运行同一 TUI 并等待退出；双击优先独立 Windows Terminal，缺失或移交失败时回退系统控制台；不提权、不安装软件、不修改系统默认设置。原支持目标为 Windows 11 x64，不预先收窄为 24H2。这里的“单 EXE”指只有一个应用 EXE，不再有独立 CLI EXE；仍保留 `_internal/`、Chromium 自身的可执行文件和便携数据目录。
 
@@ -44,7 +44,7 @@ PyInstaller 的 `hide-early/minimize-early` 在 bootloader 执行后处理已创
 
 `wt -w new`（或 `-w -1`）明确请求新窗口，可覆盖默认的新窗口/新标签页选择；`new-tab`、标题和尺寸参数有官方接口。保留当前项目已经实现的 PowerShell 7 → Windows PowerShell → cmd 优先级，以及处理路径中空格、中文、单引号和分号的引用方式，无需新依赖。[Windows Terminal 命令行参数](https://learn.microsoft.com/en-us/windows/terminal/command-line-arguments)
 
-## 最小实现轮廓（未实施）
+## 研究时的最小实现轮廓（方案已落地）
 
 1. `tools/windows.spec` 只生成一个 `console=True` 的 `wechat-channels-downloader.exe`，合并上述 manifest，保留现有依赖、浏览器及图标。检查实际嵌入资源，不能只检查源 XML。[PyInstaller manifest 构建选项](https://pyinstaller.org/en/stable/usage.html#cmdoption-m)
 2. 将 `main.py` 当前按 `sys.stdin is None` 判断“GUI 启动器”的逻辑改为显式 Windows 启动分流。已有可用控制台/终端时原地运行，不启动另一个窗口；无控制台时尝试附着父进程，成功后恢复流再运行。`AttachConsole` 在已经附着时返回 `ERROR_ACCESS_DENIED`，此失败不能解释成“双击”。[AttachConsole](https://learn.microsoft.com/en-us/windows/console/attachconsole)
@@ -58,7 +58,7 @@ PyInstaller 的 `hide-early/minimize-early` 在 bootloader 执行后处理已创
 
 | 候选 | 已有 shell 等待 | 双击初始控制台 | 本项目判断 |
 | --- | --- | --- | --- |
-| 当前 GUI + Console 两个入口 | CLI 自然等待 | GUI 不预先分配 | 当前基线，不满足一个顶层 EXE |
+| 研究前的 GUI + Console 两个入口 | CLI 自然等待 | GUI 不预先分配 | 研究时基线，现已由单 EXE 取代 |
 | 单 GUI + AttachConsole | 不能保证调用 shell 等待 | 不预先分配 | 不推荐 |
 | 单 Console，按需迁移 | 自然等待 | 旧系统可能出现 | 可行基础，但需接受旧系统外观限制 |
 | 单 Console + detached manifest | 自然等待；继承照常 | 24H2+ 可避免自动分配；旧系统仍可能出现 | 推荐验证的渐进增强候选 |
@@ -66,7 +66,9 @@ PyInstaller 的 `hide-early/minimize-early` 在 bootloader 执行后处理已创
 
 表格是上述微软、PyInstaller 文档的归纳及针对本项目的判断，不代表这些候选已在此仓库实际运行。
 
-## 必须补做的验证
+## 研究时的验收清单
+
+以下是原始验收范围，不代表全部尚未执行或全部已通过；截至当前的完成项与限制以[验证记录](validation.md)为准。
 
 - Windows 11 24H2+ 与至少一个仍在目标范围内的更早 Windows 11：真实最终 EXE 的 PE Console 子系统、嵌入 manifest、双击启动、退出及初始闪窗表现分别记录。
 - cmd、Windows PowerShell、PowerShell 7，以及 Windows Terminal 内这些 shell：直接执行、shell 等待、退出码、Ctrl+C / Ctrl+Q、输入和退出后光标恢复；检查不出现第二个窗口。

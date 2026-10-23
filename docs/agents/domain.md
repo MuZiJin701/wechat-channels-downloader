@@ -9,3 +9,4 @@
 - 有必要保留的架构权衡记录在 `docs/adr/`。
 - 与已有 ADR 冲突时，明确指出冲突及重新讨论的理由。
 - 产品需求见 [docs/requirements.md](../requirements.md)，待确认内容不视为已确定要求。
+- 当前规格、研究与历史记录的入口见[文档导航](../README.md)；运行与排查见[开发指南](../development.md)。

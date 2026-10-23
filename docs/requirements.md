@@ -2,9 +2,11 @@
 
 项目名称：微信视频号下载（`wechat-channels-downloader`）。
 
-状态：2026-10-22 启动与界面改版已获用户整体确认，用户随后授权实现代码、更新文档、提交并推送；最新要求已纳入[本地规格](spec.md)，执行情况见[验证记录](validation.md)。此前需求分别发布为 [Spec #1](https://github.com/MuZiJin701/wechat-channels-downloader/issues/1) 和 [Spec #2](https://github.com/MuZiJin701/wechat-channels-downloader/issues/2)。历史访谈中的未确认方案不代表最终决定，旧版检查结果不代表本轮改版已通过。
+状态：截至 2026-10-23，单 Windows EXE、绿系双主题、自适应、原生光标和图片 Logo／文字回退已实现，当前要求见[本地规格](spec.md)，实际执行范围见[验证记录](validation.md)。此前归档需求分别发布为 [Spec #1](https://github.com/MuZiJin701/wechat-channels-downloader/issues/1) 和 [Spec #2](https://github.com/MuZiJin701/wechat-channels-downloader/issues/2)。本文按时间保留访谈，历史候选和“未实施”表述仅描述当时状态，不代表当前程序或新增验收结论。
 
-最新“视觉、自适应、输入光标与 Logo”一轮已获用户整体确认，并授权实现、更新文档、提交和推送：采用绿系浅/深双主题、默认跟随系统并保存选择，改进窗口适配和原生细竖线光标，Python 绘制程序 Logo，并将 macOS 双击入口调整为带图标的 `.app` 终端启动器。完整确认见本文末尾，本地规格和验证记录同步维护。
+最近的 Logo 方案直接复用现有高清图；图片能力无法可靠确认时收起图形及占位，使用紧凑文字版，取代此前字符标志。Windows 本机的实际终端与便携 EXE 验证已记录；此前 Linux/macOS 的结果不能替代新增图像路径的实机验收。
+
+用户随后要求全面整理文档、将双 README 改写为普通用户的操作指南、使用 `docs/images/` 中的两张截图宣传，并明确授权提交、推送和上传 Releases。文档分工见[导航](README.md)，开发内容见[开发指南](development.md)；按项目现有版本准备 `v0.1.0`，发布包与验证范围以 Release 说明及验证记录为准。
 
 此前“浅紫主题与仓库链接”一轮及其背景加深记录保留为历史，主题要求由上述最新双主题方案取代；仓库文本链接、常规输入编辑及避免示例链接误触等未冲突约定继续适用。
 

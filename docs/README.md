@@ -25,4 +25,4 @@
 
 [项目约定](../AGENTS.md) · [Issue tracker](agents/issue-tracker.md) · [分诊标签](agents/triage-labels.md) · [领域文档规则](agents/domain.md)
 
-宣传截图位于 [images/](images/)，README 根据阅读环境的明暗模式显示对应原图。开发文档不随便携包分发；包内仅保留中英文 README，导航和宣传图片通过公开仓库访问。
+宣传截图位于 [images/](images/)，README 根据阅读环境的明暗模式显示对应原图。[皇家紫宣传海报](images/宣传海报.png)用于社交媒体，生成方法见[开发指南](development.md#宣传海报)。开发文档不随便携包分发；包内仅保留中英文 README，导航和宣传图片通过公开仓库访问。

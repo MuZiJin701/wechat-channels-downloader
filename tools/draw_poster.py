@@ -133,10 +133,9 @@ def main() -> None:
         t = (y - 650) / 150
         ink_draw.line((0, y, SIZE[0], y), fill=(round(229 - 66 * t), round(195 - 112 * t), 255))
     image.paste(ink, (0, 0), mask)
-    centered(821, "下载视频与图文，保留正文、作者和发布时间。", 33, "#bfb5ce")
-
-    draw.rounded_rectangle((495, 893, 1305, 965), radius=36, fill="#130c20", outline="#49315e", width=1)
-    centered(914, "扫码登录  ·  粘贴链接  ·  点击下载", 28, "#e0d4ed")
+    centered(818, "独立运行，无需打开电脑微信。", 42, "#f3e9ff", True)
+    centered(891, "扫码登录、粘贴下载，一处完成。", 28, "#c8ace8")
+    centered(951, "下载视频与图文，保留正文、作者和发布时间。", 27, "#a99dbb")
 
     panel(image, "深色模式使用截图.png", (6, 62, 1326, 735),
           110, 1045, 1470, "深色外观", font(23))
